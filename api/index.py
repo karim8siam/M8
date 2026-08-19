@@ -1,6 +1,6 @@
 """
-Matrix8 Vercel Serverless API Handler
-Serverless entrypoint on Vercel handling all /api/* routes.
+Matrix8 Vercel Serverless API & Static Gateway
+Handles /api/* routes and serves frontend assets seamlessly on Vercel.
 """
 
 import http.server
@@ -59,14 +59,42 @@ class handler(http.server.BaseHTTPRequestHandler):
             return {}
 
     # --------------------------------------------------------------------------
-    # API GET ROUTES
+    # GET ROUTES (STATIC ASSETS + API)
     # --------------------------------------------------------------------------
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         query = urllib.parse.parse_qs(parsed.query)
 
-        # GET /api/config
-        if parsed.path.endswith('/api/config') or parsed.path == '/api/config':
+        # 1. Static: Root / Index
+        if parsed.path == '/' or parsed.path == '' or parsed.path == '/index.html':
+            index_path = os.path.join(BASE_DIR, 'index.html')
+            if os.path.exists(index_path):
+                with open(index_path, 'rb') as f:
+                    content = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Length', str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+                return
+
+        # 2. Static: CSS / JS Assets
+        elif parsed.path.startswith('/css/') or parsed.path.startswith('/js/'):
+            file_rel = parsed.path.lstrip('/')
+            file_path = os.path.join(BASE_DIR, file_rel)
+            if os.path.exists(file_path):
+                mime = 'text/css' if file_path.endswith('.css') else 'application/javascript'
+                with open(file_path, 'rb') as f:
+                    content = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', f'{mime}; charset=utf-8')
+                self.send_header('Content-Length', str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+                return
+
+        # 3. API: GET /api/config
+        elif parsed.path.endswith('/api/config') or parsed.path == '/api/config':
             self.send_json_response({
                 'treasury_address': database.SYSTEM_TREASURY_ADDRESS,
                 'usdt_contract': bsc_verifier.BSC_USDT_CONTRACT,
@@ -77,7 +105,7 @@ class handler(http.server.BaseHTTPRequestHandler):
             })
             return
 
-        # GET /api/user-dashboard
+        # 4. API: GET /api/user-dashboard
         elif parsed.path.endswith('/api/user-dashboard') or parsed.path == '/api/user-dashboard':
             user_id = query.get('user_id', [None])[0]
             if not user_id:
@@ -90,7 +118,7 @@ class handler(http.server.BaseHTTPRequestHandler):
                 self.send_json_response({'error': 'User not found'}, status=404)
             return
 
-        # GET /api/auto-check-deposit
+        # 5. API: GET /api/auto-check-deposit
         elif parsed.path.endswith('/api/auto-check-deposit') or parsed.path == '/api/auto-check-deposit':
             user_id = query.get('user_id', [None])[0]
             if not user_id:
@@ -101,7 +129,7 @@ class handler(http.server.BaseHTTPRequestHandler):
             self.send_json_response(result)
             return
 
-        # GET /api/withdrawals
+        # 6. API: GET /api/withdrawals
         elif parsed.path.endswith('/api/withdrawals') or parsed.path == '/api/withdrawals':
             user_id = query.get('user_id', [None])[0]
             if not user_id:
@@ -111,7 +139,7 @@ class handler(http.server.BaseHTTPRequestHandler):
             self.send_json_response(wds)
             return
 
-        # GET /api/admin/withdrawals
+        # 7. API: GET /api/admin/withdrawals
         elif parsed.path.endswith('/api/admin/withdrawals') or parsed.path == '/api/admin/withdrawals':
             admin_pin = self.headers.get('X-Admin-Pin') or query.get('admin_pin', [None])[0]
             if not matrix_service.verify_admin_pin(admin_pin):
@@ -125,7 +153,7 @@ class handler(http.server.BaseHTTPRequestHandler):
             self.send_json_response({'error': f'Route not found: {parsed.path}'}, status=404)
 
     # --------------------------------------------------------------------------
-    # API POST ROUTES
+    # POST ROUTES
     # --------------------------------------------------------------------------
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
