@@ -5,16 +5,7 @@
       "dest": "/api/index.py"
     },
     {
-      "src": "/css/(.*)",
-      "dest": "/css/"
-    },
-    {
-      "src": "/js/(.*)",
-      "dest": "/js/"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "handle": "filesystem"
     }
   ]
 }
