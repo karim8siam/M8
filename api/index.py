@@ -64,23 +64,67 @@ class handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         query = urllib.parse.parse_qs(parsed.query)
+        req_path = self.headers.get('x-matched-path') or parsed.path
 
-        # 1. Static: Root / Index
-        if parsed.path == '/' or parsed.path == '' or parsed.path == '/index.html':
-            index_path = os.path.join(BASE_DIR, 'index.html')
-            if os.path.exists(index_path):
-                with open(index_path, 'rb') as f:
-                    content = f.read()
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/html; charset=utf-8')
-                self.send_header('Content-Length', str(len(content)))
-                self.end_headers()
-                self.wfile.write(content)
+        # 1. API: GET /api/config
+        if 'config' in req_path:
+            self.send_json_response({
+                'treasury_address': database.SYSTEM_TREASURY_ADDRESS,
+                'usdt_contract': bsc_verifier.BSC_USDT_CONTRACT,
+                'registration_fee_usdt': matrix_service.REGISTRATION_FEE,
+                'min_withdrawal_usdt': matrix_service.MIN_WITHDRAWAL_AMOUNT,
+                'levels_count': 8,
+                'database_mode': 'Neon PostgreSQL' if database.is_postgres() else 'SQLite'
+            })
+            return
+
+        # 2. API: GET /api/user-dashboard
+        elif 'user-dashboard' in req_path:
+            user_id = query.get('user_id', [None])[0]
+            if not user_id:
+                user_id = database.SYSTEM_ROOT_ID
+            
+            dashboard = matrix_service.get_user_dashboard(user_id)
+            if dashboard:
+                self.send_json_response(dashboard)
+            else:
+                self.send_json_response({'error': 'User not found'}, status=404)
+            return
+
+        # 3. API: GET /api/auto-check-deposit
+        elif 'auto-check-deposit' in req_path:
+            user_id = query.get('user_id', [None])[0]
+            if not user_id:
+                self.send_json_response({'verified': False, 'error': 'Missing user_id'}, status=400)
                 return
+            
+            result = matrix_service.auto_detect_and_activate(user_id)
+            self.send_json_response(result)
+            return
 
-        # 2. Static: CSS / JS Assets
-        elif parsed.path.startswith('/css/') or parsed.path.startswith('/js/'):
-            file_rel = parsed.path.lstrip('/')
+        # 4. API: GET /api/withdrawals
+        elif 'withdrawals' in req_path and 'admin' not in req_path:
+            user_id = query.get('user_id', [None])[0]
+            if not user_id:
+                self.send_json_response({'error': 'Missing user_id'}, status=400)
+                return
+            wds = matrix_service.get_user_withdrawals(user_id)
+            self.send_json_response(wds)
+            return
+
+        # 5. API: GET /api/admin/withdrawals
+        elif 'admin/withdrawals' in req_path or 'admin_withdrawals' in req_path:
+            admin_pin = self.headers.get('X-Admin-Pin') or query.get('admin_pin', [None])[0]
+            if not matrix_service.verify_admin_pin(admin_pin):
+                self.send_json_response({'error': 'Unauthorized: Valid Admin PIN required.'}, status=401)
+                return
+            wds = matrix_service.admin_get_all_withdrawals()
+            self.send_json_response(wds)
+            return
+
+        # 6. Static / Fallback serving
+        elif req_path.startswith('/css/') or req_path.startswith('/js/'):
+            file_rel = req_path.lstrip('/')
             file_path = os.path.join(BASE_DIR, file_rel)
             if os.path.exists(file_path):
                 mime = 'text/css' if file_path.endswith('.css') else 'application/javascript'
@@ -93,64 +137,19 @@ class handler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(content)
                 return
 
-        # 3. API: GET /api/config
-        elif parsed.path.endswith('/api/config') or parsed.path == '/api/config':
-            self.send_json_response({
-                'treasury_address': database.SYSTEM_TREASURY_ADDRESS,
-                'usdt_contract': bsc_verifier.BSC_USDT_CONTRACT,
-                'registration_fee_usdt': matrix_service.REGISTRATION_FEE,
-                'min_withdrawal_usdt': matrix_service.MIN_WITHDRAWAL_AMOUNT,
-                'levels_count': 8,
-                'database_mode': 'Neon PostgreSQL' if database.is_postgres() else 'SQLite'
-            })
+        # Fallback to index.html
+        index_path = os.path.join(BASE_DIR, 'index.html')
+        if os.path.exists(index_path):
+            with open(index_path, 'rb') as f:
+                content = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
             return
 
-        # 4. API: GET /api/user-dashboard
-        elif parsed.path.endswith('/api/user-dashboard') or parsed.path == '/api/user-dashboard':
-            user_id = query.get('user_id', [None])[0]
-            if not user_id:
-                user_id = database.SYSTEM_ROOT_ID
-            
-            dashboard = matrix_service.get_user_dashboard(user_id)
-            if dashboard:
-                self.send_json_response(dashboard)
-            else:
-                self.send_json_response({'error': 'User not found'}, status=404)
-            return
-
-        # 5. API: GET /api/auto-check-deposit
-        elif parsed.path.endswith('/api/auto-check-deposit') or parsed.path == '/api/auto-check-deposit':
-            user_id = query.get('user_id', [None])[0]
-            if not user_id:
-                self.send_json_response({'verified': False, 'error': 'Missing user_id'}, status=400)
-                return
-            
-            result = matrix_service.auto_detect_and_activate(user_id)
-            self.send_json_response(result)
-            return
-
-        # 6. API: GET /api/withdrawals
-        elif parsed.path.endswith('/api/withdrawals') or parsed.path == '/api/withdrawals':
-            user_id = query.get('user_id', [None])[0]
-            if not user_id:
-                self.send_json_response({'error': 'Missing user_id'}, status=400)
-                return
-            wds = matrix_service.get_user_withdrawals(user_id)
-            self.send_json_response(wds)
-            return
-
-        # 7. API: GET /api/admin/withdrawals
-        elif parsed.path.endswith('/api/admin/withdrawals') or parsed.path == '/api/admin/withdrawals':
-            admin_pin = self.headers.get('X-Admin-Pin') or query.get('admin_pin', [None])[0]
-            if not matrix_service.verify_admin_pin(admin_pin):
-                self.send_json_response({'error': 'Unauthorized: Valid Admin PIN required.'}, status=401)
-                return
-            wds = matrix_service.admin_get_all_withdrawals()
-            self.send_json_response(wds)
-            return
-
-        else:
-            self.send_json_response({'error': f'Route not found: {parsed.path}'}, status=404)
+        self.send_json_response({'error': f'Route not found: {parsed.path}'}, status=404)
 
     # --------------------------------------------------------------------------
     # POST ROUTES
@@ -158,9 +157,10 @@ class handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         body = self.read_json_body()
+        req_path = self.headers.get('x-matched-path') or parsed.path
 
         # POST /api/register
-        if parsed.path.endswith('/api/register') or parsed.path == '/api/register':
+        if 'register' in req_path:
             email = body.get('email', '')
             password = body.get('password', '')
             sponsor_id = body.get('sponsor_id', '')
@@ -181,7 +181,7 @@ class handler(http.server.BaseHTTPRequestHandler):
             return
 
         # POST /api/verify-deposit
-        elif parsed.path.endswith('/api/verify-deposit') or parsed.path == '/api/verify-deposit':
+        elif 'verify-deposit' in req_path:
             user_id = body.get('user_id', '')
             tx_hash = body.get('tx_hash', '').strip()
             is_mock_test = body.get('is_mock_test', False)
@@ -219,7 +219,7 @@ class handler(http.server.BaseHTTPRequestHandler):
             return
 
         # POST /api/login
-        elif parsed.path.endswith('/api/login') or parsed.path == '/api/login':
+        elif 'login' in req_path:
             email = body.get('email', '') or body.get('email_or_wallet', '') or body.get('wallet_address', '')
             credential = body.get('credential', '') or body.get('password', '')
 
@@ -231,7 +231,7 @@ class handler(http.server.BaseHTTPRequestHandler):
             return
 
         # POST /api/withdraw
-        elif parsed.path.endswith('/api/withdraw') or parsed.path == '/api/withdraw':
+        elif req_path.endswith('withdraw') or 'api/withdraw' in req_path:
             user_id = body.get('user_id', '')
             amount = body.get('amount', 0.0)
 
@@ -247,7 +247,7 @@ class handler(http.server.BaseHTTPRequestHandler):
             return
 
         # POST /api/admin/verify-4factor
-        elif parsed.path.endswith('/api/admin/verify-4factor') or parsed.path == '/api/admin/verify-4factor':
+        elif 'verify-4factor' in req_path:
             pass1 = body.get('pass1', '') or body.get('password_1', '')
             pass2 = body.get('pass2', '') or body.get('password_2', '')
             pin = body.get('pin', '')
@@ -261,7 +261,7 @@ class handler(http.server.BaseHTTPRequestHandler):
             return
 
         # POST /api/admin/verify-pin
-        elif parsed.path.endswith('/api/admin/verify-pin') or parsed.path == '/api/admin/verify-pin':
+        elif 'verify-pin' in req_path:
             pin = body.get('admin_pin', '')
             if matrix_service.verify_admin_pin(pin):
                 self.send_json_response({'success': True, 'verified': True})
@@ -270,7 +270,7 @@ class handler(http.server.BaseHTTPRequestHandler):
             return
 
         # POST /api/admin/process-withdrawal
-        elif parsed.path.endswith('/api/admin/process-withdrawal') or parsed.path == '/api/admin/process-withdrawal' or parsed.path.endswith('/api/admin/process-payout'):
+        elif 'process-withdrawal' in req_path or 'process-payout' in req_path:
             admin_pin = self.headers.get('X-Admin-Pin') or body.get('admin_pin')
             if not matrix_service.verify_admin_pin(admin_pin):
                 self.send_json_response({'success': False, 'error': 'Unauthorized: Valid Admin PIN required.'}, status=401)
