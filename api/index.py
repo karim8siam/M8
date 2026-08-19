@@ -1,6 +1,6 @@
 """
 Matrix8 Vercel Serverless REST API
-Handles all /api/* backend routes for Matrix8 on Vercel.
+Handles all /api/* backend routes and database operations for Matrix8 on Vercel.
 """
 
 import http.server
@@ -8,6 +8,7 @@ import os
 import json
 import urllib.parse
 import sys
+import time
 
 # Add backend directory to sys.path
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -120,79 +121,6 @@ class handler(http.server.BaseHTTPRequestHandler):
                 return
             wds = matrix_service.admin_get_all_withdrawals()
             self.send_json_response(wds)
-            return
-
-
-        # POST /api/admin/migrate-data
-        elif 'migrate-data' in req_path:
-            admin_pin = self.headers.get('X-Admin-Pin') or body.get('admin_pin', '')
-            if not matrix_service.verify_admin_pin(admin_pin):
-                self.send_json_response({'success': False, 'error': 'Unauthorized: Admin PIN required.'}, status=401)
-                return
-
-            data = body.get('data', {})
-            conn = database.get_db()
-            cursor = conn.cursor()
-
-            migrated_counts = {'users': 0, 'level_stats': 0, 'withdrawals': 0, 'transactions': 0}
-
-            # 1. Users
-            for u in data.get('users', []):
-                cursor.execute('SELECT unique_id FROM users WHERE unique_id = ?', (u['unique_id'],))
-                if not cursor.fetchone():
-                    cursor.execute('INSERT INTO users (unique_id, email, password_hash, wallet_address, referrer_id, telegram_handle, status, join_timestamp, total_earned, wallet_balance, total_withdrawn, directs_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (
-                        u['unique_id'], u['email'], u['password_hash'], u['wallet_address'],
-                        u.get('referrer_id'), u.get('telegram_handle', ''), u.get('status', 'ACTIVE'),
-                        u.get('join_timestamp', int(time.time())), u.get('total_earned', 0.0),
-                        u.get('wallet_balance', 0.0), u.get('total_withdrawn', 0.0), u.get('directs_count', 0)
-                    ))
-                else:
-                    cursor.execute('UPDATE users SET email = ?, password_hash = ?, wallet_address = ?, referrer_id = ?, telegram_handle = ?, status = ?, total_earned = ?, wallet_balance = ?, total_withdrawn = ?, directs_count = ? WHERE unique_id = ?', (
-                        u['email'], u['password_hash'], u['wallet_address'], u.get('referrer_id'),
-                        u.get('telegram_handle', ''), u.get('status', 'ACTIVE'), u.get('total_earned', 0.0),
-                        u.get('wallet_balance', 0.0), u.get('total_withdrawn', 0.0), u.get('directs_count', 0),
-                        u['unique_id']
-                    ))
-                migrated_counts['users'] += 1
-
-            # 2. Level Stats
-            for ls in data.get('level_stats', []):
-                cursor.execute('SELECT user_id FROM level_stats WHERE user_id = ? AND level_num = ?', (ls['user_id'], ls['level_num']))
-                if not cursor.fetchone():
-                    cursor.execute('INSERT INTO level_stats (user_id, level_num, member_count, earned_amount) VALUES (?, ?, ?, ?)', (ls['user_id'], ls['level_num'], ls.get('member_count', 0), ls.get('earned_amount', 0.0)))
-                else:
-                    cursor.execute('UPDATE level_stats SET member_count = ?, earned_amount = ? WHERE user_id = ? AND level_num = ?', (ls.get('member_count', 0), ls.get('earned_amount', 0.0), ls['user_id'], ls['level_num']))
-                migrated_counts['level_stats'] += 1
-
-            # 3. Withdrawals
-            for w in data.get('withdrawals', []):
-                cursor.execute('SELECT withdrawal_id FROM withdrawals WHERE withdrawal_id = ?', (w['withdrawal_id'],))
-                if not cursor.fetchone():
-                    cursor.execute('INSERT INTO withdrawals (withdrawal_id, user_id, wallet_address, amount_usdt, fee_usdt, net_amount, status, tx_hash, request_timestamp, processed_timestamp, admin_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (
-                        w['withdrawal_id'], w['user_id'], w.get('wallet_address') or w.get('target_wallet', ''),
-                        w.get('amount_usdt', 0.0), w.get('fee_usdt', 0.0), w.get('net_amount', 0.0),
-                        w.get('status', 'PENDING'), w.get('tx_hash', ''), w.get('request_timestamp', int(time.time())),
-                        w.get('processed_timestamp'), w.get('admin_note') or w.get('admin_notes', '')
-                    ))
-                    migrated_counts['withdrawals'] += 1
-
-            # 4. Transactions
-            for tx in data.get('transactions', []):
-                if tx.get('tx_hash'):
-                    cursor.execute('SELECT tx_hash FROM transactions WHERE tx_hash = ?', (tx['tx_hash'],))
-                    if not cursor.fetchone():
-                        cursor.execute('INSERT INTO transactions (tx_hash, tx_type, from_user_id, to_user_id, from_wallet, to_wallet, amount_usdt, level_num, timestamp, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (
-                            tx['tx_hash'], tx.get('tx_type', ''), tx.get('from_user_id'),
-                            tx.get('to_user_id'), tx.get('from_wallet'), tx.get('to_wallet'),
-                            tx.get('amount_usdt', 0.0), tx.get('level_num'), tx.get('timestamp', int(time.time())),
-                            tx.get('status', 'CONFIRMED'), tx.get('note')
-                        ))
-                        migrated_counts['transactions'] += 1
-
-            conn.commit()
-            conn.close()
-
-            self.send_json_response({'success': True, 'migrated': migrated_counts})
             return
 
         else:
@@ -338,7 +266,6 @@ class handler(http.server.BaseHTTPRequestHandler):
                 self.send_json_response({'success': False, 'error': str(e)}, status=400)
             return
 
-
         # POST /api/admin/migrate-data
         elif 'migrate-data' in req_path:
             admin_pin = self.headers.get('X-Admin-Pin') or body.get('admin_pin', '')
@@ -347,68 +274,71 @@ class handler(http.server.BaseHTTPRequestHandler):
                 return
 
             data = body.get('data', {})
-            conn = database.get_db()
-            cursor = conn.cursor()
+            try:
+                conn = database.get_db()
+                cursor = conn.cursor()
 
-            migrated_counts = {'users': 0, 'level_stats': 0, 'withdrawals': 0, 'transactions': 0}
+                migrated_counts = {'users': 0, 'level_stats': 0, 'withdrawals': 0, 'transactions': 0}
 
-            # 1. Users
-            for u in data.get('users', []):
-                cursor.execute('SELECT unique_id FROM users WHERE unique_id = ?', (u['unique_id'],))
-                if not cursor.fetchone():
-                    cursor.execute('INSERT INTO users (unique_id, email, password_hash, wallet_address, referrer_id, telegram_handle, status, join_timestamp, total_earned, wallet_balance, total_withdrawn, directs_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (
-                        u['unique_id'], u['email'], u['password_hash'], u['wallet_address'],
-                        u.get('referrer_id'), u.get('telegram_handle', ''), u.get('status', 'ACTIVE'),
-                        u.get('join_timestamp', int(time.time())), u.get('total_earned', 0.0),
-                        u.get('wallet_balance', 0.0), u.get('total_withdrawn', 0.0), u.get('directs_count', 0)
-                    ))
-                else:
-                    cursor.execute('UPDATE users SET email = ?, password_hash = ?, wallet_address = ?, referrer_id = ?, telegram_handle = ?, status = ?, total_earned = ?, wallet_balance = ?, total_withdrawn = ?, directs_count = ? WHERE unique_id = ?', (
-                        u['email'], u['password_hash'], u['wallet_address'], u.get('referrer_id'),
-                        u.get('telegram_handle', ''), u.get('status', 'ACTIVE'), u.get('total_earned', 0.0),
-                        u.get('wallet_balance', 0.0), u.get('total_withdrawn', 0.0), u.get('directs_count', 0),
-                        u['unique_id']
-                    ))
-                migrated_counts['users'] += 1
-
-            # 2. Level Stats
-            for ls in data.get('level_stats', []):
-                cursor.execute('SELECT user_id FROM level_stats WHERE user_id = ? AND level_num = ?', (ls['user_id'], ls['level_num']))
-                if not cursor.fetchone():
-                    cursor.execute('INSERT INTO level_stats (user_id, level_num, member_count, earned_amount) VALUES (?, ?, ?, ?)', (ls['user_id'], ls['level_num'], ls.get('member_count', 0), ls.get('earned_amount', 0.0)))
-                else:
-                    cursor.execute('UPDATE level_stats SET member_count = ?, earned_amount = ? WHERE user_id = ? AND level_num = ?', (ls.get('member_count', 0), ls.get('earned_amount', 0.0), ls['user_id'], ls['level_num']))
-                migrated_counts['level_stats'] += 1
-
-            # 3. Withdrawals
-            for w in data.get('withdrawals', []):
-                cursor.execute('SELECT withdrawal_id FROM withdrawals WHERE withdrawal_id = ?', (w['withdrawal_id'],))
-                if not cursor.fetchone():
-                    cursor.execute('INSERT INTO withdrawals (withdrawal_id, user_id, wallet_address, amount_usdt, fee_usdt, net_amount, status, tx_hash, request_timestamp, processed_timestamp, admin_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (
-                        w['withdrawal_id'], w['user_id'], w.get('wallet_address') or w.get('target_wallet', ''),
-                        w.get('amount_usdt', 0.0), w.get('fee_usdt', 0.0), w.get('net_amount', 0.0),
-                        w.get('status', 'PENDING'), w.get('tx_hash', ''), w.get('request_timestamp', int(time.time())),
-                        w.get('processed_timestamp'), w.get('admin_note') or w.get('admin_notes', '')
-                    ))
-                    migrated_counts['withdrawals'] += 1
-
-            # 4. Transactions
-            for tx in data.get('transactions', []):
-                if tx.get('tx_hash'):
-                    cursor.execute('SELECT tx_hash FROM transactions WHERE tx_hash = ?', (tx['tx_hash'],))
+                # 1. Users
+                for u in data.get('users', []):
+                    cursor.execute('SELECT unique_id FROM users WHERE unique_id = ?', (u['unique_id'],))
                     if not cursor.fetchone():
-                        cursor.execute('INSERT INTO transactions (tx_hash, tx_type, from_user_id, to_user_id, from_wallet, to_wallet, amount_usdt, level_num, timestamp, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (
-                            tx['tx_hash'], tx.get('tx_type', ''), tx.get('from_user_id'),
-                            tx.get('to_user_id'), tx.get('from_wallet'), tx.get('to_wallet'),
-                            tx.get('amount_usdt', 0.0), tx.get('level_num'), tx.get('timestamp', int(time.time())),
-                            tx.get('status', 'CONFIRMED'), tx.get('note')
+                        cursor.execute('INSERT INTO users (unique_id, email, password_hash, wallet_address, referrer_id, telegram_handle, status, join_timestamp, total_earned, wallet_balance, total_withdrawn, directs_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (
+                            u['unique_id'], u['email'], u['password_hash'], u['wallet_address'],
+                            u.get('referrer_id'), u.get('telegram_handle', ''), u.get('status', 'ACTIVE'),
+                            u.get('join_timestamp', int(time.time())), u.get('total_earned', 0.0),
+                            u.get('wallet_balance', 0.0), u.get('total_withdrawn', 0.0), u.get('directs_count', 0)
                         ))
-                        migrated_counts['transactions'] += 1
+                    else:
+                        cursor.execute('UPDATE users SET email = ?, password_hash = ?, wallet_address = ?, referrer_id = ?, telegram_handle = ?, status = ?, total_earned = ?, wallet_balance = ?, total_withdrawn = ?, directs_count = ? WHERE unique_id = ?', (
+                            u['email'], u['password_hash'], u['wallet_address'], u.get('referrer_id'),
+                            u.get('telegram_handle', ''), u.get('status', 'ACTIVE'), u.get('total_earned', 0.0),
+                            u.get('wallet_balance', 0.0), u.get('total_withdrawn', 0.0), u.get('directs_count', 0),
+                            u['unique_id']
+                        ))
+                    migrated_counts['users'] += 1
 
-            conn.commit()
-            conn.close()
+                # 2. Level Stats
+                for ls in data.get('level_stats', []):
+                    cursor.execute('SELECT user_id FROM level_stats WHERE user_id = ? AND level_num = ?', (ls['user_id'], ls['level_num']))
+                    if not cursor.fetchone():
+                        cursor.execute('INSERT INTO level_stats (user_id, level_num, member_count, earned_amount) VALUES (?, ?, ?, ?)', (ls['user_id'], ls['level_num'], ls.get('member_count', 0), ls.get('earned_amount', 0.0)))
+                    else:
+                        cursor.execute('UPDATE level_stats SET member_count = ?, earned_amount = ? WHERE user_id = ? AND level_num = ?', (ls.get('member_count', 0), ls.get('earned_amount', 0.0), ls['user_id'], ls['level_num']))
+                    migrated_counts['level_stats'] += 1
 
-            self.send_json_response({'success': True, 'migrated': migrated_counts})
+                # 3. Withdrawals
+                for w in data.get('withdrawals', []):
+                    cursor.execute('SELECT withdrawal_id FROM withdrawals WHERE withdrawal_id = ?', (w['withdrawal_id'],))
+                    if not cursor.fetchone():
+                        cursor.execute('INSERT INTO withdrawals (withdrawal_id, user_id, wallet_address, amount_usdt, fee_usdt, net_amount, status, tx_hash, request_timestamp, processed_timestamp, admin_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (
+                            w['withdrawal_id'], w['user_id'], w.get('wallet_address') or w.get('target_wallet', ''),
+                            w.get('amount_usdt', 0.0), w.get('fee_usdt', 0.0), w.get('net_amount', 0.0),
+                            w.get('status', 'PENDING'), w.get('tx_hash', ''), w.get('request_timestamp', int(time.time())),
+                            w.get('processed_timestamp'), w.get('admin_note') or w.get('admin_notes', '')
+                        ))
+                        migrated_counts['withdrawals'] += 1
+
+                # 4. Transactions
+                for tx in data.get('transactions', []):
+                    if tx.get('tx_hash'):
+                        cursor.execute('SELECT tx_hash FROM transactions WHERE tx_hash = ?', (tx['tx_hash'],))
+                        if not cursor.fetchone():
+                            cursor.execute('INSERT INTO transactions (tx_hash, tx_type, from_user_id, to_user_id, from_wallet, to_wallet, amount_usdt, level_num, timestamp, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (
+                                tx['tx_hash'], tx.get('tx_type', ''), tx.get('from_user_id'),
+                                tx.get('to_user_id'), tx.get('from_wallet'), tx.get('to_wallet'),
+                                tx.get('amount_usdt', 0.0), tx.get('level_num'), tx.get('timestamp', int(time.time())),
+                                tx.get('status', 'CONFIRMED'), tx.get('note')
+                            ))
+                            migrated_counts['transactions'] += 1
+
+                conn.commit()
+                conn.close()
+
+                self.send_json_response({'success': True, 'migrated': migrated_counts})
+            except Exception as e:
+                self.send_json_response({'success': False, 'error': f'Migration error: {str(e)}'}, status=500)
             return
 
         else:
