@@ -49,9 +49,13 @@ class PostgresCursorWrapper:
         self.col_names = []
 
     def _convert_sql(self, sql):
-        # Convert SQLite '?' to Postgres '%s'
-        converted = sql.replace('?', '%s')
-        # Convert SQLite 'INSERT OR IGNORE' to Postgres 'INSERT ... ON CONFLICT DO NOTHING'
+        # 1. Escape literal '%' in SQL by temporarily protecting '?'
+        token = '__PARAM_PLACEHOLDER__'
+        tmp = sql.replace('?', token)
+        tmp = tmp.replace('%', '%%')
+        converted = tmp.replace(token, '%s')
+
+        # 2. Convert SQLite 'INSERT OR IGNORE' to Postgres 'INSERT ... ON CONFLICT DO NOTHING'
         if 'INSERT OR IGNORE INTO' in converted:
             converted = converted.replace('INSERT OR IGNORE INTO', 'INSERT INTO')
             if 'ON CONFLICT' not in converted:
