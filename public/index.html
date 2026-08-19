@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+  <meta name="theme-color" content="#07090e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Matrix8 | Web3 8-Level BEP-20 Network Platform</title>
+  <meta name="description" content="Decentralized 8-Level BEP-20 Network with instant direct wallet payouts on 3.4 USDT activation.">
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="css/styles.css?v=4.0.0">
+
+  <!-- QRCode.js Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+
+  <!-- =========================================================================
+       NAVBAR
+       ========================================================================= -->
+  <header class="navbar">
+    <div class="container nav-wrapper">
+      <a href="#" class="brand-logo" onclick="if(window.App) window.App.showUserDashboard(); return false;">
+        <div class="brand-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        </div>
+        <span>MATRIX<span style="color: var(--primary-cyan)">8</span></span>
+        <span class="brand-badge">BSC BEP-20</span>
+      </a>
+
+      <!-- Center Navigation Tabs (Only visible when user is logged in) -->
+      <nav class="nav-center-tabs" id="navTabs" style="display: none;">
+        <button class="nav-tab-btn active" id="tabBtnDashboard" data-tab="tab-overview" onclick="if(window.App) window.App.showUserDashboard();">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          Dashboard
+        </button>
+        <button class="nav-tab-btn" data-tab="tab-tree">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="3"></circle><circle cx="6" cy="19" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="M12 8v4M6 16v-2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"></path></svg>
+          Network Tree
+        </button>
+        <button class="nav-tab-btn" data-tab="tab-telegram">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>
+          Telegram Hub
+        </button>
+        <button class="nav-tab-btn" id="navAdminPayoutsBtn" onclick="if(window.App) window.App.openAdminWithdrawals();" style="display: none; color: #F59E0B; border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.08);">
+          👑 Admin Payouts <span id="navPendingBadge" style="background: #F59E0B; color: #000; padding: 1px 6px; border-radius: 99px; font-size: 0.7rem; font-weight: 800; margin-left: 4px;">0</span>
+        </button>
+      </nav>
+
+      <!-- Nav Actions -->
+      <div class="nav-actions">
+        <!-- Guest State (Visible when not logged in) -->
+        <div id="navGuestBar" style="display: flex; align-items: center; gap: 0.5rem;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="if(window.App) { window.App.switchAuthMode('login'); window.App.showRegistrationPage(); }">
+            🔑 Login
+          </button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="if(window.App) { window.App.switchAuthMode('register'); window.App.showRegistrationPage(); }">
+            📝 Join Now
+          </button>
+        </div>
+
+        <!-- Authenticated State (Only visible when user is logged in) -->
+        <div id="navUserBar" style="display: none; align-items: center; gap: 0.5rem;">
+          <div class="user-id-chip">
+            <span style="font-size: 0.7rem; color: var(--text-secondary)">ID:</span>
+            <span id="navUserUniqueId">---</span>
+          </div>
+
+          <button class="wallet-badge-btn" id="navWalletBadge" onclick="if(window.App) window.App.copyUserBep20Address();" title="Click to copy BEP-20 Address">
+            <span class="wallet-status-dot"></span>
+            <span id="navWalletAddressShort">0x...</span>
+          </button>
+
+          <button type="button" class="btn btn-secondary btn-sm" id="btnNavLogout" onclick="if(window.App) window.App.handleLogout();" title="Logout / Switch Account" style="padding: 4px 8px; font-size: 0.75rem; color: var(--accent-rose); border-color: rgba(244, 63, 94, 0.3);">
+            🚪 Logout
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- =========================================================================
+       MAIN CONTAINER
+       ========================================================================= -->
+  <main class="container">
+
+    <!-- =======================================================================
+         VIEW 1: REGISTRATION & LOGIN LANDING PAGE (DEFAULT FOR NEW VISITORS)
+         ======================================================================= -->
+    <section id="onboardingView" class="hero-section" style="display: block;">
+      <div class="hero-pill">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--primary-emerald);"></span>
+        Binance Smart Chain (BEP-20) • 100% Instant Direct Payouts • 8-Level Commission Matrix
+      </div>
+
+      <h1 class="hero-title">
+        Decentralized 8-Level<br>BEP-20 Referral Network
+      </h1>
+      <p class="hero-subtitle">
+        Join for <strong>3.40 USDT (BEP-20)</strong>. Every activation automatically distributes <strong>71% directly to 8 upline BEP-20 wallets</strong> in real-time on Binance Smart Chain with <strong>zero withdrawal delay</strong>.
+      </p>
+
+      <div class="onboarding-card-grid">
+        
+        <!-- Registration & Login Card -->
+        <div class="glass-card highlight-emerald">
+          
+          <!-- Auth Toggle Tabs -->
+          <div style="display: flex; background: var(--bg-surface-1); border-radius: var(--radius-md); padding: 4px; margin-bottom: 1.25rem; border: 1px solid var(--border-subtle);">
+            <button type="button" id="toggleTabRegister" class="btn btn-sm" style="flex: 1; border-radius: var(--radius-sm); font-weight: 700; background: var(--primary-emerald); color: #fff;" onclick="if(window.App) window.App.switchAuthMode('register');">
+              📝 Join & Activate (3.4 USDT)
+            </button>
+            <button type="button" id="toggleTabLogin" class="btn btn-sm" style="flex: 1; border-radius: var(--radius-sm); font-weight: 700; background: transparent; color: var(--text-secondary);" onclick="if(window.App) window.App.switchAuthMode('login');">
+              🔑 Member Login
+            </button>
+          </div>
+
+          <!-- ==========================================
+               MODE 1: REGISTRATION FORM
+               ========================================== -->
+          <div id="authRegisterContainer">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+              <h3>Activate Membership</h3>
+              <span class="mono" id="regFeeBadge" style="background: rgba(16, 185, 129, 0.15); color: var(--primary-emerald); padding: 4px 10px; border-radius: var(--radius-sm); font-size: 0.85rem; font-weight: 700;">3.40 USDT (BEP20)</span>
+            </div>
+
+            <!-- Dynamic VIP Free Banner (Visible when M8-ADMIN is used) -->
+            <div id="vipFreeBadgeContainer" style="display: none; background: rgba(16, 185, 129, 0.15); border: 1px solid var(--border-glow-emerald); border-radius: var(--radius-md); padding: 0.75rem 1rem; margin-bottom: 1.25rem; text-align: center;">
+              <div style="font-size: 0.85rem; font-weight: 700; color: var(--primary-emerald);">✨ ADMIN VIP PRIVILEGE: 100% FREE ACTIVATION</div>
+              <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">Joining via official Admin Link. Deposit fee waived ($0.00 USDT)!</div>
+            </div>
+
+            <form id="registerForm" onsubmit="return false;">
+              
+              <!-- MANDATORY SPONSOR ID -->
+              <div class="form-group">
+                <label class="form-label" for="regSponsorId">
+                  <span style="color: var(--primary-cyan); font-weight: 700;">★ Referrer / Sponsor ID</span>
+                </label>
+                <input type="text" id="regSponsorId" class="form-input mono" placeholder="Enter Sponsor ID (e.g. M8-XXXXXX)" value="" oninput="if(window.App) window.App.checkSponsorVipStatus();">
+                <p class="form-hint">Enter the unique Sponsor ID of the member who invited you.</p>
+              </div>
+
+              <!-- EMAIL -->
+              <div class="form-group">
+                <label class="form-label" for="regEmail">Gmail / Email Address</label>
+                <input type="email" id="regEmail" class="form-input" placeholder="name@gmail.com">
+                <p class="form-hint">Used for login identification and account access.</p>
+              </div>
+
+              <!-- PASSWORD -->
+              <div class="form-group">
+                <label class="form-label" for="regPassword">Security Password</label>
+                <input type="password" id="regPassword" class="form-input" placeholder="Create your account password">
+              </div>
+
+              <!-- BEP-20 WALLET ADDRESS -->
+              <div class="form-group">
+                <label class="form-label" for="regBep20Wallet">
+                  <span>BEP-20 USDT Wallet Address</span>
+                  <span style="color: var(--primary-emerald); font-size: 0.75rem;">Binance Smart Chain</span>
+                </label>
+                <input type="text" id="regBep20Wallet" class="form-input mono" placeholder="0x... (Paste your BEP-20 USDT Address)">
+                <p class="form-hint">⚠️ All 8-level instant commission payouts will be sent directly to this BEP-20 address.</p>
+              </div>
+
+              <!-- TELEGRAM USERNAME -->
+              <div class="form-group">
+                <label class="form-label" for="regTelegram">
+                  <span>Telegram Handle (Optional)</span>
+                  <span style="color: var(--primary-cyan); font-size: 0.75rem;">For Instant Bot Alerts</span>
+                </label>
+                <input type="text" id="regTelegram" class="form-input" placeholder="@your_telegram_handle">
+              </div>
+
+              <!-- Primary Pay / Register Button -->
+              <button type="button" class="btn btn-primary btn-lg" id="btnSubmitRegister" style="width: 100%; margin-top: 0.5rem;" onclick="if(window.App) window.App.handleRegister();">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span id="btnRegisterText">Pay 3.4 USDT & Activate Membership</span>
+              </button>
+            </form>
+          </div>
+
+          <!-- ==========================================
+               MODE 2: MEMBER LOGIN FORM
+               ========================================== -->
+          <div id="authLoginContainer" style="display: none;">
+            <div style="margin-bottom: 1.25rem;">
+              <h3>Member Login</h3>
+              <p style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 2px;">
+                Enter your registered Gmail and either your Password OR your BEP-20 Address to access your dashboard.
+              </p>
+            </div>
+
+            <form id="loginForm" onsubmit="return false;">
+              
+              <!-- LOGIN GMAIL / WALLET ADDRESS / ID -->
+              <div class="form-group">
+                <label class="form-label" for="loginEmail">
+                  <span>Registered Gmail, BEP-20 Address, or ID</span>
+                  <span style="color: var(--primary-cyan); font-size: 0.75rem;">Flexible Login</span>
+                </label>
+                <input type="text" id="loginEmail" class="form-input" placeholder="name@gmail.com, 0x... wallet, or M8-ADMIN">
+              </div>
+
+              <!-- LOGIN CREDENTIAL (PASSWORD OR WALLET CONFIRMATION) -->
+              <div class="form-group">
+                <label class="form-label" for="loginCredential">
+                  <span>Password OR BEP-20 Wallet Address</span>
+                  <span style="color: var(--text-muted); font-size: 0.75rem;">(Optional if wallet entered above)</span>
+                </label>
+                <input type="password" id="loginCredential" class="form-input" placeholder="Enter password or 0x... BEP-20 address">
+                <p class="form-hint">🔒 You can log in with your Gmail + Password, or simply enter your registered BEP-20 address!</p>
+              </div>
+
+              <!-- REMEMBER DEVICE CHECKBOX -->
+              <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.25rem;">
+                <input type="checkbox" id="loginRemember" checked style="width: 16px; height: 16px; accent-color: var(--primary-emerald); cursor: pointer;">
+                <label for="loginRemember" style="font-size: 0.82rem; color: var(--text-secondary); cursor: pointer; user-select: none;">
+                  Remember this device (Stay logged in on this phone/computer)
+                </label>
+              </div>
+
+              <!-- Submit Login Button -->
+              <button type="button" class="btn btn-primary btn-lg" id="btnSubmitLogin" style="width: 100%;" onclick="if(window.App) window.App.handleLogin();">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>
+                <span>Log In to Dashboard ➔</span>
+              </button>
+            </form>
+          </div>
+
+        </div>
+
+        <!-- 8-Tier Revenue Transparency & Product Included Card -->
+        <div class="glass-card">
+          <h3 style="margin-bottom: 0.5rem;">8-Tier Instant Commission Split</h3>
+          <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+            When any member joins in your downline, commissions route directly to your BEP-20 address in seconds:
+          </p>
+
+          <div class="split-preview-box">
+            <div class="split-preview-header">
+              <span>TIER / BENEFICIARY</span>
+              <span>COMMISSION</span>
+            </div>
+            <div class="split-item highlight">
+              <span>Level 1 (Direct Sponsor) - 21%</span>
+              <span class="mono">$0.7140 USDT</span>
+            </div>
+            <div class="split-item">
+              <span>Level 2 Upline - 16%</span>
+              <span class="mono">$0.5440 USDT</span>
+            </div>
+            <div class="split-item">
+              <span>Level 3 Upline - 13%</span>
+              <span class="mono">$0.4420 USDT</span>
+            </div>
+            <div class="split-item">
+              <span>Level 4 Upline - 9%</span>
+              <span class="mono">$0.3060 USDT</span>
+            </div>
+            <div class="split-item">
+              <span>Level 5 Upline - 6%</span>
+              <span class="mono">$0.2040 USDT</span>
+            </div>
+            <div class="split-item">
+              <span>Level 6 Upline - 3%</span>
+              <span class="mono">$0.1020 USDT</span>
+            </div>
+            <div class="split-item">
+              <span>Level 7 Upline - 2%</span>
+              <span class="mono">$0.0680 USDT</span>
+            </div>
+            <div class="split-item">
+              <span>Level 8 Upline - 1%</span>
+              <span class="mono">$0.0340 USDT</span>
+            </div>
+            <div class="split-item" style="border-top: 1px dashed var(--border-medium); padding-top: 5px; margin-top: 5px; color: var(--accent-amber);">
+              <span>System Treasury Reserve - 29%</span>
+              <span class="mono">$0.9860 USDT</span>
+            </div>
+          </div>
+
+          <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid var(--border-glow-emerald); border-radius: var(--radius-md); padding: 0.9rem; margin-top: 1rem;">
+            <div style="font-weight: 700; font-size: 0.85rem; color: var(--primary-emerald); margin-bottom: 0.35rem;">
+              ⚡ 100% Instant Direct BEP-20 Payouts:
+            </div>
+            <p style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.45; margin: 0;">
+              Commissions are automatically settled into uplines' verified BEP-20 wallet addresses in real-time. No balance lock, no withdrawal delay!
+            </p>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- =====================================================================
+           OFFICIAL COMMUNITY & CHANNEL CONNECT SECTION
+           ===================================================================== -->
+      <div style="margin-top: 2.25rem; padding-top: 1.5rem; border-top: 1px solid var(--border-subtle);">
+        <div style="text-align: center; margin-bottom: 1.5rem;">
+          <h3 style="font-size: 1.35rem; font-weight: 800; color: #ffffff;">Official Community & Video Hub</h3>
+          <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.25rem;">
+            Stay connected directly with our official channels for live commission proofs, tutorials, and strategy updates:
+          </p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; max-width: 900px; margin: 0 auto;">
+          
+          <!-- Telegram Card -->
+          <a href="https://t.me/QuickMOneyq" target="_blank" rel="noopener noreferrer" class="glass-card" style="display: flex; align-items: center; gap: 1.25rem; text-decoration: none; border-color: rgba(42, 171, 238, 0.4); background: linear-gradient(135deg, rgba(42, 171, 238, 0.1) 0%, var(--bg-card) 100%); transition: transform 0.2s, box-shadow 0.2s;">
+            <div style="width: 56px; height: 56px; border-radius: 50%; background: #2AABEE; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 16px rgba(42, 171, 238, 0.45);">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69.01-.03.01-.14-.07-.19-.08-.05-.19-.02-.27 0-.12.03-1.99 1.27-5.63 3.73-.53.36-1.02.54-1.45.53-.48-.01-1.4-.27-2.09-.49-.84-.27-1.51-.42-1.45-.89.03-.25.38-.51 1.07-.78 4.2-1.83 7-3.04 8.41-3.64 4-.1.72 1.48 1.63 1.48 2.07 0 .04 0 .09-.01.12z" fill="#ffffff"/>
+              </svg>
+            </div>
+            <div style="flex: 1;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-weight: 800; font-size: 1.05rem; color: #ffffff;">Quick Money Telegram</span>
+                <span style="font-size: 0.72rem; background: rgba(42, 171, 238, 0.25); color: #2AABEE; padding: 2px 8px; border-radius: 99px; font-weight: 700;">@QuickMOneyq</span>
+              </div>
+              <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.25rem 0 0.5rem;">Official group & instant announcements</p>
+              <span style="font-size: 0.82rem; font-weight: 700; color: #2AABEE; display: inline-flex; align-items: center; gap: 4px;">
+                Join Telegram Channel ➔
+              </span>
+            </div>
+          </a>
+
+          <!-- YouTube Card -->
+          <a href="https://www.youtube.com/channel/UCPBmO6pr_m1XNX5PuPmQiDA" target="_blank" rel="noopener noreferrer" class="glass-card" style="display: flex; align-items: center; gap: 1.25rem; text-decoration: none; border-color: rgba(255, 0, 0, 0.4); background: linear-gradient(135deg, rgba(255, 0, 0, 0.1) 0%, var(--bg-card) 100%); transition: transform 0.2s, box-shadow 0.2s;">
+            <div style="width: 56px; height: 56px; border-radius: 50%; background: #FF0000; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 16px rgba(255, 0, 0, 0.45);">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
+                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ffffff"/>
+              </svg>
+            </div>
+            <div style="flex: 1;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-weight: 800; font-size: 1.05rem; color: #ffffff;">Quick Money YouTube</span>
+                <span style="font-size: 0.72rem; background: rgba(255, 0, 0, 0.25); color: #FF4D4D; padding: 2px 8px; border-radius: 99px; font-weight: 700;">Subscribe</span>
+              </div>
+              <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.25rem 0 0.5rem;">Official video guides & tutorials</p>
+              <span style="font-size: 0.82rem; font-weight: 700; color: #FF4D4D; display: inline-flex; align-items: center; gap: 4px;">
+                Watch YouTube Channel ➔
+              </span>
+            </div>
+          </a>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- =======================================================================
+         VIEW 2: USER DASHBOARD (AUTHENTICATED MEMBERS ONLY)
+         ======================================================================= -->
+    <section id="dashboardView" style="display: none; padding-top: 1.5rem;">
+
+      <!-- Top KPI Summary Cards (Option 2 Balance & Withdrawals) -->
+      <div class="dashboard-grid" style="padding-top: 0; padding-bottom: 1rem;">
+        
+        <!-- Withdrawable Wallet Balance -->
+        <div class="kpi-card" style="border-color: var(--border-glow-emerald); background: linear-gradient(180deg, rgba(16, 185, 129, 0.12) 0%, var(--bg-card) 100%);">
+          <div class="kpi-top">
+            <span class="kpi-label" style="color: var(--primary-emerald); font-weight: 700;">Available Balance</span>
+            <div class="kpi-icon emerald">💵</div>
+          </div>
+          <div class="kpi-value mono" id="kpiWalletBalance" style="font-size: 2rem; color: #10B981;">$0.0000 USDT</div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+            <span class="kpi-badge-positive" style="background: rgba(16, 185, 129, 0.2); color: #10B981;">● Withdrawable</span>
+            <button class="btn btn-emerald btn-sm" id="btnOpenWithdrawModal" onclick="if(window.App) window.App.openWithdrawModal();" style="padding: 4px 12px; font-size: 0.78rem; font-weight: 700;">
+              💸 Withdraw Funds
+            </button>
+          </div>
+        </div>
+
+        <!-- Total Lifetime Earned -->
+        <div class="kpi-card">
+          <div class="kpi-top">
+            <span class="kpi-label">Total Lifetime Earned</span>
+            <div class="kpi-icon emerald">💰</div>
+          </div>
+          <div class="kpi-value mono" id="kpiTotalEarned" style="font-size: 1.75rem;">$0.0000 USDT</div>
+          <div class="kpi-sub" style="display: flex; justify-content: space-between;">
+            <span>● 8-Level Matrix Total</span>
+            <span id="kpiTotalWithdrawnLabel" class="mono" style="color: var(--text-muted); font-size: 0.75rem;">Paid Out: $0.00</span>
+          </div>
+        </div>
+
+        <!-- Instant Payout BEP-20 Wallet -->
+        <div class="kpi-card">
+          <div class="kpi-top">
+            <span class="kpi-label">Payout Receiving Wallet</span>
+            <div class="kpi-icon cyan">👛</div>
+          </div>
+          <div class="kpi-value mono" id="kpiWalletAddressShort" style="font-size: 1.15rem; word-break: break-all;">0x00...0000</div>
+          <div class="kpi-sub">
+            <span class="kpi-badge-positive" style="background: rgba(6, 182, 212, 0.15); color: var(--primary-cyan);">● Verified BEP-20</span> Direct Payouts
+          </div>
+        </div>
+
+        <!-- Total Downlines Across All Levels -->
+        <div class="kpi-card">
+          <div class="kpi-top">
+            <span class="kpi-label">Team Members (Direct/Total)</span>
+            <div class="kpi-icon purple">👥</div>
+          </div>
+          <div class="kpi-value mono" style="font-size: 1.75rem;">
+            <span id="kpiDirectCount">0</span> <span style="font-size: 1rem; color: var(--text-muted);">/ <span id="kpiTotalMembers">0</span></span>
+          </div>
+          <div class="kpi-sub">
+            <span style="color: var(--accent-amber);">⭐ Level 1: 21%</span> • Levels 2-8: 50%
+          </div>
+        </div>
+      </div>
+
+      <!-- 8-Level Matrix Cards & Sidebar -->
+      <div class="dashboard-grid" style="padding-top: 0;">
+        
+        <!-- Left 8 Columns: 8-Level Breakdown -->
+        <div class="matrix-section">
+          <div style="display: flex; justify-content: space-between; align-items: baseline;">
+            <div>
+              <h2>8-Level Member & Income Breakdown</h2>
+              <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                Exact member count and USDT earned per level for your account:
+              </p>
+            </div>
+          </div>
+
+          <!-- 8 Level Cards -->
+          <div class="matrix-grid-8" id="matrixGridCards"></div>
+
+          <!-- Live Activity Feed -->
+          <div style="margin-top: 2rem;">
+            <h3 style="margin-bottom: 0.75rem;">Your Network Commission History</h3>
+            <div class="feed-list" id="activityFeedList"></div>
+          </div>
+
+          <!-- Withdrawals & Payout Requests History -->
+          <div style="margin-top: 2rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+              <h3 style="margin: 0;">Your Withdrawal Requests & Payouts</h3>
+              <button class="btn btn-secondary btn-sm" onclick="if(window.App) window.App.openWithdrawModal();">
+                + New Request
+              </button>
+            </div>
+            <div class="feed-list" id="withdrawalHistoryList"></div>
+          </div>
+        </div>
+
+        <!-- Right 4 Columns: Referral Hub & Payout Info -->
+        <div class="sidebar-section">
+          
+          <!-- Referral Hub -->
+          <div class="ref-hub-card">
+            <h3>Your Unique Referral Hub</h3>
+            <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+              Share your link. When new members pay 3.4 USDT, you earn instant 21% Level 1 commission ($0.714 USDT)!
+            </p>
+
+            <div class="qr-code-wrapper" id="qrCodeContainer"></div>
+
+            <div style="text-align: center; margin-bottom: 0.75rem;">
+              <span style="font-size: 0.75rem; color: var(--text-muted);">YOUR UNIQUE ID:</span>
+              <span class="mono" id="refCardUniqueId" style="font-weight: 800; color: var(--primary-cyan); font-size: 1rem; margin-left: 0.35rem;">M8-VIP001</span>
+            </div>
+
+            <div class="copy-input-group">
+              <input type="text" id="refLinkInput" readonly value="https://matrix8.io/?ref=M8-VIP001">
+              <button class="btn btn-cyan btn-sm" id="btnCopyRefLink">Copy</button>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem;">
+              <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="if(window.App) window.App.shareSocial('telegram');">Telegram Share</button>
+              <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="if(window.App) window.App.shareSocial('whatsapp');">WhatsApp Share</button>
+            </div>
+          </div>
+
+          <!-- BEP-20 Instant Routing Info Card -->
+          <div class="glass-card" style="margin-top: 1rem; border-color: var(--border-glow-emerald);">
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+              <span style="font-size: 1.4rem;">⚡</span>
+              <h4 style="color: var(--primary-emerald); margin: 0;">Direct BEP-20 Payouts</h4>
+            </div>
+            <p style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 0.75rem;">
+              Commissions are automatically settled directly on Binance Smart Chain into your verified wallet address.
+            </p>
+            <div style="background: var(--bg-surface-1); border-radius: var(--radius-sm); padding: 0.75rem; font-size: 0.78rem;">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                <span style="color: var(--text-muted);">Network:</span>
+                <span class="mono" style="color: var(--primary-cyan);">Binance Smart Chain (BSC)</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                <span style="color: var(--text-muted);">Asset:</span>
+                <span class="mono" style="color: var(--primary-emerald);">USDT (BEP-20)</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: var(--text-muted);">Payout Delay:</span>
+                <span class="mono" style="color: var(--accent-amber);">~3 Seconds (Instant)</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+
+
+    <!-- =======================================================================
+         TAB 3: NETWORK TREE
+         ======================================================================= -->
+    <section id="tabContent-tree" class="tab-pane" style="display: none; padding-top: 1.5rem;">
+      <div class="tree-view-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <div>
+            <h2>Downline Network Tree Explorer</h2>
+            <p style="font-size: 0.85rem; color: var(--text-secondary);">Visual tree representation of your downline team across levels</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="if(window.App) window.App.renderNetworkTree();">Refresh Tree</button>
+        </div>
+        <div class="tree-container" id="downlineTreeContainer"></div>
+      </div>
+    </section>
+
+    <!-- =======================================================================
+         TAB 4: TELEGRAM BOT INTEGRATION
+         ======================================================================= -->
+    <section id="tabContent-telegram" class="tab-pane" style="display: none; padding-top: 1.5rem;">
+      <div class="glass-card" style="max-width: 800px; margin: 0 auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <div>
+            <h2>Telegram Bot & Instant Notification Hub</h2>
+            <p style="font-size: 0.85rem; color: var(--text-secondary);">Connect with @QuickMOneyq for real-time commission pings</p>
+          </div>
+          <a href="https://t.me/QuickMOneyq" target="_blank" rel="noopener noreferrer" class="btn btn-cyan btn-sm">Join @QuickMOneyq</a>
+        </div>
+
+        <div style="background: var(--bg-surface-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 1.5rem;">
+          <h4 style="margin-bottom: 0.5rem; color: var(--primary-cyan);">How Telegram Bot Alerts Work:</h4>
+          <ol style="font-size: 0.82rem; color: var(--text-secondary); padding-left: 1.25rem; line-height: 1.6;">
+            <li>Whenever someone in your 8-level downline joins, a commission is dispatched to your BEP-20 wallet.</li>
+            <li>The Matrix8 Bot immediately pushes an encrypted instant message with the exact Level, USDT amount, and BSCScan transaction hash.</li>
+          </ol>
+        </div>
+
+        <h3>Recent Telegram Bot Broadcasts:</h3>
+        <div id="telegramLogsContainer" style="margin-top: 0.75rem;"></div>
+      </div>
+    </section>
+
+    <!-- Footer Connect Section -->
+    <footer style="margin-top: 3.5rem; padding: 2rem 1rem 1rem; border-top: 1px solid var(--border-subtle); text-align: center;">
+      <div style="display: flex; justify-content: center; align-items: center; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+        <a href="https://t.me/QuickMOneyq" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; color: #2AABEE; font-weight: 700; font-size: 0.9rem; background: rgba(42, 171, 238, 0.1); padding: 6px 14px; border-radius: 99px; border: 1px solid rgba(42, 171, 238, 0.25);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="#2AABEE"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69.01-.03.01-.14-.07-.19-.08-.05-.19-.02-.27 0-.12.03-1.99 1.27-5.63 3.73-.53.36-1.02.54-1.45.53-.48-.01-1.4-.27-2.09-.49-.84-.27-1.51-.42-1.45-.89.03-.25.38-.51 1.07-.78 4.2-1.83 7-3.04 8.41-3.64 4-.1.72 1.48 1.63 1.48 2.07 0 .04 0 .09-.01.12z"/></svg>
+          Telegram: @QuickMOneyq
+        </a>
+        <a href="https://www.youtube.com/channel/UCPBmO6pr_m1XNX5PuPmQiDA" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; color: #FF4D4D; font-weight: 700; font-size: 0.9rem; background: rgba(255, 0, 0, 0.1); padding: 6px 14px; border-radius: 99px; border: 1px solid rgba(255, 0, 0, 0.25);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="#FF0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+          YouTube Channel
+        </a>
+      </div>
+      <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0;">
+        Matrix8 Decentralized BEP-20 Network &copy; 2026. All rights reserved.
+      </p>
+      <div style="margin-top: 0.75rem;">
+        <a href="javascript:void(0)" onclick="if(window.App) window.App.openAdminAuthGate();" style="display: inline-flex; align-items: center; gap: 4px; text-decoration: none; color: var(--text-muted); font-size: 0.72rem; border: 1px solid rgba(255,255,255,0.08); padding: 3px 10px; border-radius: 99px;">
+          🔒 Admin Control Panel
+        </a>
+      </div>
+    </footer>
+
+  </main>
+
+  <!-- Modal: BSC Payment & On-Chain Verification -->
+  <div class="modal-overlay" id="modalPaymentVerify">
+    <div class="modal-dialog" style="max-width: 520px;">
+      <button class="modal-close-btn" onclick="if(window.App) window.App.closeModal('modalPaymentVerify');">✕</button>
+      <div class="modal-header">
+        <h3 class="modal-title">Pay 3.4 USDT (BEP-20)</h3>
+        <p class="modal-subtitle">Send 3.40 USDT on Binance Smart Chain to activate your membership</p>
+      </div>
+
+      <!-- Deposit Amount Badge -->
+      <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid var(--border-glow-emerald); border-radius: var(--radius-md); padding: 1rem; text-align: center; margin-bottom: 1rem;">
+        <span style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;">Required Activation Deposit</span>
+        <div class="mono" style="font-size: 1.75rem; font-weight: 800; color: var(--primary-emerald); margin: 0.25rem 0;">3.40 USDT (BEP-20)</div>
+        <span style="font-size: 0.78rem; color: var(--primary-cyan);">Network: Binance Smart Chain (BSC Mainnet)</span>
+      </div>
+
+      <!-- Live Auto-Detection Radar -->
+      <div id="autoScanRadar" style="display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.3); border-radius: var(--radius-md); padding: 0.65rem; margin-bottom: 1.25rem;">
+        <span class="wallet-status-dot" style="background: var(--primary-cyan); box-shadow: 0 0 10px var(--primary-cyan);"></span>
+        <span id="autoScanRadarText" style="font-size: 0.8rem; font-weight: 700; color: var(--primary-cyan);">⚡ Auto-detecting transfer from your wallet on BSC...</span>
+      </div>
+
+      <!-- QR Code -->
+      <div style="background: #fff; width: 140px; height: 140px; margin: 0 auto 1.25rem; padding: 10px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center;" id="paymentQrBox"></div>
+
+      <!-- Treasury Address Copy -->
+      <div class="form-group">
+        <label class="form-label">
+          <span>System Treasury Address (Recipient)</span>
+          <span style="color: var(--accent-amber); font-size: 0.75rem;">MetaMask BEP-20</span>
+        </label>
+        <div class="copy-input-group">
+          <input type="text" id="payTreasuryAddressInput" readonly class="mono" value="0x9ff36bB1b16F1421b2CeBFFE311aCB8D5800AE43">
+          <button class="btn btn-cyan btn-sm" onclick="if(window.App) window.App.copyTreasuryAddress();">Copy</button>
+        </div>
+      </div>
+
+      <!-- Tx Hash Submission -->
+      <div class="form-group" style="margin-top: 1rem;">
+        <label class="form-label" for="depositTxHashInput">
+          <span>BSC Transaction Hash (TxID)</span>
+          <span style="color: var(--primary-emerald); font-size: 0.75rem;">Instant Verification</span>
+        </label>
+        <input type="text" id="depositTxHashInput" class="form-input mono" placeholder="0x... (Paste your 66-character BSC Transaction Hash)">
+        <p class="form-hint">Once you send 3.4 USDT from your wallet, paste the transaction hash here to verify immediately on-chain.</p>
+      </div>
+
+      <div style="margin-top: 1.25rem;">
+        <button class="btn btn-primary btn-lg" id="btnConfirmOnChainTx" style="width: 100%;" onclick="if(window.App) window.App.handleVerifyDeposit();">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          Verify On-Chain & Activate Account ➔
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Deposit USDT (BEP-20) -->
+  <div class="modal-overlay" id="modalDeposit">
+    <div class="modal-dialog">
+      <button class="modal-close-btn" onclick="if(window.App) window.App.closeModal('modalDeposit');">✕</button>
+      <div class="modal-header">
+        <h3 class="modal-title">Deposit USDT (BEP-20)</h3>
+        <p class="modal-subtitle">Send Binance Smart Chain BEP-20 USDT to your address</p>
+      </div>
+
+      <div style="background: #fff; width: 140px; height: 140px; margin: 0 auto 1.25rem; padding: 10px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center;" id="depositQrBox"></div>
+
+      <div class="form-group">
+        <label class="form-label">Your BEP-20 Address</label>
+        <div class="copy-input-group">
+          <input type="text" id="depositAddressInput" readonly class="mono" value="0x...">
+          <button class="btn btn-cyan btn-sm" onclick="if(window.App) window.App.copyDepositAddress();">Copy</button>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem; border-top: 1px solid var(--border-subtle); padding-top: 1rem;">
+        <span style="font-size: 0.8rem; color: var(--text-muted);">Quick Test / Simulation Deposit:</span>
+        <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+          <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="if(window.App) window.App.quickDeposit(10);">+$10 USDT</button>
+          <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="if(window.App) window.App.quickDeposit(50);">+$50 USDT</button>
+          <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="if(window.App) window.App.quickDeposit(100);">+$100 USDT</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+
+  <!-- Modal: Member Withdrawal Request (Option 2 Balance & Withdrawals) -->
+  <div class="modal-overlay" id="modalWithdraw">
+    <div class="modal-dialog" style="max-width: 480px;">
+      <button class="modal-close-btn" onclick="if(window.App) window.App.closeModal('modalWithdraw');">✕</button>
+      <div class="modal-header">
+        <h3 class="modal-title">Withdraw USDT (BEP-20)</h3>
+        <p class="modal-subtitle">Request payout from your available affiliate balance to your verified BEP-20 wallet</p>
+      </div>
+
+      <!-- Available Balance Card -->
+      <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid var(--border-glow-emerald); border-radius: var(--radius-md); padding: 1rem; text-align: center; margin-bottom: 1.25rem;">
+        <span style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase;">Available Withdrawable Balance</span>
+        <div class="mono" id="withdrawModalAvailableBal" style="font-size: 1.85rem; font-weight: 800; color: var(--primary-emerald); margin: 0.25rem 0;">$0.0000 USDT</div>
+        <span style="font-size: 0.75rem; color: var(--text-secondary);">Minimum payout: $5.00 USDT • 0% Platform Fee</span>
+      </div>
+
+      <!-- Receiving Address (Strictly Locked to Registered Wallet) -->
+      <div class="form-group">
+        <label class="form-label">
+          <span>Receiving BEP-20 Wallet Address</span>
+          <span style="color: var(--primary-cyan); font-size: 0.75rem;">Verified Locked</span>
+        </label>
+        <input type="text" id="withdrawModalTargetWallet" readonly class="form-input mono" style="background: var(--bg-surface-1); color: var(--text-secondary);" value="0x...">
+        <p class="form-hint" style="color: var(--text-muted);">Payouts are strictly routed to your verified registered BEP-20 address.</p>
+      </div>
+
+      <!-- Amount Input with Max button -->
+      <div class="form-group" style="margin-top: 1rem;">
+        <label class="form-label" for="withdrawAmountInput">
+          <span>Withdrawal Amount (USDT)</span>
+          <span style="color: var(--primary-emerald); font-size: 0.75rem;">BEP-20</span>
+        </label>
+        <div style="position: relative;">
+          <input type="number" id="withdrawAmountInput" class="form-input mono" placeholder="5.00" step="0.01" min="5.00" style="padding-right: 70px;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="if(window.App) window.App.setWithdrawMax();" style="position: absolute; right: 6px; top: 6px; padding: 4px 10px; font-size: 0.75rem; font-weight: 700;">
+            MAX
+          </button>
+        </div>
+      </div>
+
+      <div style="margin-top: 1.5rem;">
+        <button class="btn btn-primary btn-lg" id="btnSubmitWithdrawal" style="width: 100%;" onclick="if(window.App) window.App.handleWithdrawSubmit();">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+          Submit Withdrawal Request ➔
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Admin Withdrawal Management -->
+  <div class="modal-overlay" id="modalAdminWithdrawals">
+    <div class="modal-dialog" style="max-width: 850px;">
+      <button class="modal-close-btn" onclick="if(window.App) window.App.closeModal('modalAdminWithdrawals');">✕</button>
+      <div class="modal-header">
+        <h3 class="modal-title">👑 Admin Payout & Withdrawal Control</h3>
+        <p class="modal-subtitle">Disburse member earnings via 1-Click MetaMask Web3 or Manual Exchange Transfer</p>
+      </div>
+
+      <!-- Quick Metrics Bar -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 1rem; margin-bottom: 1rem;">
+        <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-md); padding: 0.75rem 1rem;">
+          <div style="font-size: 0.75rem; color: #F59E0B; font-weight: 700; text-transform: uppercase;">Pending Payouts Queue</div>
+          <div class="mono" id="adminPendingStats" style="font-size: 1.25rem; font-weight: 800; color: #F59E0B; margin-top: 2px;">0 Requests ($0.00 USDT)</div>
+        </div>
+        <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-md); padding: 0.75rem 1rem;">
+          <div style="font-size: 0.75rem; color: #10B981; font-weight: 700; text-transform: uppercase;">Completed Payouts</div>
+          <div class="mono" id="adminCompletedStats" style="font-size: 1.25rem; font-weight: 800; color: #10B981; margin-top: 2px;">0 Requests ($0.00 USDT)</div>
+        </div>
+      </div>
+
+      <!-- Dual Mode Switcher Navigation Tabs -->
+      <div style="display: flex; gap: 0.5rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.75rem; margin-bottom: 1rem;">
+        <button type="button" class="btn btn-secondary btn-sm admin-tab-toggle active" id="adminTabBtnMetaMask" onclick="if(window.App) window.App.switchAdminPayoutTab('metamask');" style="background: rgba(245, 158, 11, 0.15); color: #F59E0B; border-color: rgba(245, 158, 11, 0.4); font-weight: 700;">
+          🦊 1-Click MetaMask Payouts
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm admin-tab-toggle" id="adminTabBtnManual" onclick="if(window.App) window.App.switchAdminPayoutTab('manual');" style="font-weight: 700;">
+          📋 Manual Transfer & Confirm
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm admin-tab-toggle" id="adminTabBtnHistory" onclick="if(window.App) window.App.switchAdminPayoutTab('history');" style="font-weight: 700;">
+          🟢 Completed Archive
+        </button>
+      </div>
+
+      <!-- Mode Instructions Banner -->
+      <div id="adminModeBanner" style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: var(--radius-sm); padding: 0.6rem 0.9rem; font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 1rem;">
+        <span style="color: #F59E0B; font-weight: 700;">🦊 MetaMask Web3 Mode:</span> Click "1-Click Disburse" to trigger a direct BEP-20 USDT transfer from your connected wallet without copy-pasting. Once confirmed, it automatically marks completed!
+      </div>
+
+      <div id="adminWithdrawalsTableContainer" style="max-height: 400px; overflow-y: auto;">
+        <div style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading withdrawal queue...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: 4-Factor Master Security Vault Gate -->
+  <div class="modal-overlay" id="modalAdminAuthGate">
+    <div class="modal-dialog" style="max-width: 460px;">
+      <button class="modal-close-btn" onclick="if(window.App) window.App.closeModal('modalAdminAuthGate');">✕</button>
+      <div style="text-align: center; margin-bottom: 1rem;">
+        <div style="font-size: 2.5rem; margin-bottom: 0.25rem;">🔐</div>
+        <h3 class="modal-title" style="color: #F59E0B;">4-Factor Master Vault Gate</h3>
+        <p class="modal-subtitle" style="font-size: 0.78rem;">Strict security authorization required to access Payout & Treasury control</p>
+      </div>
+
+      <!-- Factor 1: Password 1 -->
+      <div class="form-group" style="margin-bottom: 0.75rem;">
+        <label class="form-label" for="adminPass1Input" style="font-size: 0.78rem;">
+          <span>1. Master Password 1</span>
+          <span style="color: #F59E0B; font-size: 0.7rem;">Primary Key</span>
+        </label>
+        <input type="password" id="adminPass1Input" class="form-input mono" placeholder="Enter Password 1" autocomplete="off">
+      </div>
+
+      <!-- Factor 2: Password 2 -->
+      <div class="form-group" style="margin-bottom: 0.75rem;">
+        <label class="form-label" for="adminPass2Input" style="font-size: 0.78rem;">
+          <span>2. Secondary Password 2</span>
+          <span style="color: #F59E0B; font-size: 0.7rem;">Secondary Key</span>
+        </label>
+        <input type="password" id="adminPass2Input" class="form-input mono" placeholder="Enter Password 2" autocomplete="off">
+      </div>
+
+      <!-- Factor 3 & 4 Grid: PIN & Secret Word -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem;">
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" for="adminPinInput" style="font-size: 0.78rem;">
+            <span>3. Security PIN</span>
+          </label>
+          <input type="password" id="adminPinInput" class="form-input mono" placeholder="6-Digit PIN" maxlength="10" autocomplete="off">
+        </div>
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" for="adminFavInput" style="font-size: 0.78rem;">
+            <span>4. Secret Tag (Fav)</span>
+          </label>
+          <input type="text" id="adminFavInput" class="form-input mono" placeholder="Secret word" autocomplete="off">
+        </div>
+      </div>
+
+      <div style="margin-top: 1.25rem;">
+        <button class="btn btn-primary btn-lg" id="btnSubmitAdmin4Factor" style="width: 100%; background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%); color: #000; font-weight: 800;" onclick="if(window.App) window.App.handleAdmin4FactorSubmit();">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+          Authorize & Unlock Vault Controls ➔
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Scripts with cache busting -->
+  <script src="js/matrixEngine.js?v=4.6.0"></script>
+  <script src="js/telegramService.js?v=4.6.0"></script>
+  <script src="js/walletService.js?v=4.6.0"></script>
+  <script src="js/authService.js?v=4.6.0"></script>
+  <script src="js/app.js?v=4.6.0"></script>
+</body>
+</html>

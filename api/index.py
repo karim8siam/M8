@@ -1,6 +1,6 @@
 """
-Matrix8 Vercel Serverless API & Static Gateway
-Handles /api/* routes and serves frontend assets seamlessly on Vercel.
+Matrix8 Vercel Serverless REST API
+Handles all /api/* backend routes for Matrix8 on Vercel.
 """
 
 import http.server
@@ -9,7 +9,7 @@ import json
 import urllib.parse
 import sys
 
-# Ensure backend directory is in sys.path
+# Add backend directory to sys.path
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(CURRENT_DIR)
 sys.path.insert(0, os.path.join(BASE_DIR, 'backend'))
@@ -18,7 +18,7 @@ import database
 import matrix_service
 import bsc_verifier
 
-# Initialize database (creates tables if connecting to Neon PostgreSQL for first time)
+# Initialize database on startup
 try:
     database.init_db()
 except Exception as e:
@@ -59,15 +59,15 @@ class handler(http.server.BaseHTTPRequestHandler):
             return {}
 
     # --------------------------------------------------------------------------
-    # GET ROUTES (STATIC ASSETS + API)
+    # GET ROUTES (/api/*)
     # --------------------------------------------------------------------------
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         query = urllib.parse.parse_qs(parsed.query)
-        req_path = self.headers.get('x-matched-path') or parsed.path
+        req_path = parsed.path
 
-        # 1. API: GET /api/config
-        if 'config' in req_path:
+        # GET /api/config
+        if req_path.endswith('/config') or 'config' in req_path:
             self.send_json_response({
                 'treasury_address': database.SYSTEM_TREASURY_ADDRESS,
                 'usdt_contract': bsc_verifier.BSC_USDT_CONTRACT,
@@ -78,7 +78,7 @@ class handler(http.server.BaseHTTPRequestHandler):
             })
             return
 
-        # 2. API: GET /api/user-dashboard
+        # GET /api/user-dashboard
         elif 'user-dashboard' in req_path:
             user_id = query.get('user_id', [None])[0]
             if not user_id:
@@ -91,7 +91,7 @@ class handler(http.server.BaseHTTPRequestHandler):
                 self.send_json_response({'error': 'User not found'}, status=404)
             return
 
-        # 3. API: GET /api/auto-check-deposit
+        # GET /api/auto-check-deposit
         elif 'auto-check-deposit' in req_path:
             user_id = query.get('user_id', [None])[0]
             if not user_id:
@@ -102,7 +102,7 @@ class handler(http.server.BaseHTTPRequestHandler):
             self.send_json_response(result)
             return
 
-        # 4. API: GET /api/withdrawals
+        # GET /api/withdrawals
         elif 'withdrawals' in req_path and 'admin' not in req_path:
             user_id = query.get('user_id', [None])[0]
             if not user_id:
@@ -112,8 +112,8 @@ class handler(http.server.BaseHTTPRequestHandler):
             self.send_json_response(wds)
             return
 
-        # 5. API: GET /api/admin/withdrawals
-        elif 'admin/withdrawals' in req_path or 'admin_withdrawals' in req_path:
+        # GET /api/admin/withdrawals
+        elif 'admin' in req_path and 'withdrawals' in req_path:
             admin_pin = self.headers.get('X-Admin-Pin') or query.get('admin_pin', [None])[0]
             if not matrix_service.verify_admin_pin(admin_pin):
                 self.send_json_response({'error': 'Unauthorized: Valid Admin PIN required.'}, status=401)
@@ -122,42 +122,16 @@ class handler(http.server.BaseHTTPRequestHandler):
             self.send_json_response(wds)
             return
 
-        # 6. Static / Fallback serving
-        elif req_path.startswith('/css/') or req_path.startswith('/js/'):
-            file_rel = req_path.lstrip('/')
-            file_path = os.path.join(BASE_DIR, file_rel)
-            if os.path.exists(file_path):
-                mime = 'text/css' if file_path.endswith('.css') else 'application/javascript'
-                with open(file_path, 'rb') as f:
-                    content = f.read()
-                self.send_response(200)
-                self.send_header('Content-Type', f'{mime}; charset=utf-8')
-                self.send_header('Content-Length', str(len(content)))
-                self.end_headers()
-                self.wfile.write(content)
-                return
-
-        # Fallback to index.html
-        index_path = os.path.join(BASE_DIR, 'index.html')
-        if os.path.exists(index_path):
-            with open(index_path, 'rb') as f:
-                content = f.read()
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.send_header('Content-Length', str(len(content)))
-            self.end_headers()
-            self.wfile.write(content)
-            return
-
-        self.send_json_response({'error': f'Route not found: {parsed.path}'}, status=404)
+        else:
+            self.send_json_response({'error': f'Route not found: {parsed.path}'}, status=404)
 
     # --------------------------------------------------------------------------
-    # POST ROUTES
+    # POST ROUTES (/api/*)
     # --------------------------------------------------------------------------
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         body = self.read_json_body()
-        req_path = self.headers.get('x-matched-path') or parsed.path
+        req_path = parsed.path
 
         # POST /api/register
         if 'register' in req_path:
