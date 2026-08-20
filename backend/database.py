@@ -60,6 +60,10 @@ class PostgresCursorWrapper:
             converted = converted.replace('INSERT OR IGNORE INTO', 'INSERT INTO')
             if 'ON CONFLICT' not in converted:
                 converted = converted + ' ON CONFLICT DO NOTHING'
+
+        # 3. Safeguard: convert double-quoted SQL string constants to single quotes for Postgres
+        import re
+        converted = re.sub(r'\"([A-Za-z0-9_]+)\"', r"'\1'", converted)
         return converted
 
     def execute(self, sql, params=None):

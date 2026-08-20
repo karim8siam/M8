@@ -190,7 +190,7 @@ def activate_user_and_distribute(user_id, tx_hash):
         return {'status': 'ALREADY_ACTIVE', 'unique_id': user_id}
 
     # Activate user
-    cursor.execute('UPDATE users SET status = "ACTIVE" WHERE unique_id = ?', (user_id,))
+    cursor.execute("UPDATE users SET status = 'ACTIVE' WHERE unique_id = ?", (user_id,))
 
     # Log the incoming 3.4 USDT deposit
     now = int(time.time())
