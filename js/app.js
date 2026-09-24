@@ -15,6 +15,8 @@ class AppController {
     this.pendingUser = null;
     this.authMode = 'register'; // 'register' or 'login'
     this.autoPollInterval = null;
+    this.selectedStage = 1;
+    this.currentDashboardData = null;
 
     this.init();
   }
@@ -146,7 +148,19 @@ class AppController {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  async showUserDashboard(passedUser = null) {
+  switchMatrixStage(stageNum) {
+    this.selectedStage = Number(stageNum);
+    const user = this.authService.getCurrentUser();
+    const userId = user ? (user.unique_id || user.uniqueId) : localStorage.getItem(this.authService.SESSION_KEY);
+    if (userId) {
+      this.showUserDashboard(null, this.selectedStage);
+    }
+  }
+
+  async showUserDashboard(passedUser = null, reqStage = null) {
+    const stageToLoad = reqStage || this.selectedStage || 1;
+    this.selectedStage = stageToLoad;
+
     const onboardingView = document.getElementById('onboardingView');
     const dashboardView = document.getElementById('dashboardView');
     const navTabs = document.getElementById('navTabs');
@@ -163,7 +177,7 @@ class AppController {
     }
 
     try {
-      const res = await fetch(`/api/user-dashboard?user_id=${userId}&t=${Date.now()}`);
+      const res = await fetch(`/api/user-dashboard?user_id=${userId}&stage=${stageToLoad}&t=${Date.now()}`);
       if (res.ok) {
         const liveData = await res.json();
 
@@ -199,9 +213,117 @@ class AppController {
     }
   }
 
+  renderStageProgression(data) {
+    const navContainer = document.getElementById('stageSwitcherNav');
+    const badgeContainer = document.getElementById('stageStatusBadge');
+    const cardTitle = document.getElementById('stageProgressionTitle');
+    const cardSubtitle = document.getElementById('stageProgressionSubtitle');
+    const boostBadge = document.getElementById('stageProgressionBoostBadge');
+    const ratioEl = document.getElementById('stageProgressRatio');
+    const fillEl = document.getElementById('stageProgressFill');
+    const actionContainer = document.getElementById('stageUpgradeActionContainer');
+
+    const curStage = Number(data.current_stage || 1);
+    const viewStage = Number(data.active_view_stage || 1);
+    const unlockedStages = data.unlocked_stages || [1];
+    const nextStage = Number(data.next_stage || (curStage + 1));
+    const nextFee = Number(data.next_stage_fee || (3.40 * Math.pow(1.15, nextStage - 1)));
+    const targetMembers = Number(data.milestone_target || 1000);
+    const curQualifying = Number(data.qualifying_downlines || 0);
+    const progressPct = Math.min(100, Math.max(0, Number(data.stage_progress_pct || 0)));
+
+    // 1. Render Stage Switcher Tabs
+    if (navContainer) {
+      const maxStageToShow = Math.max(...unlockedStages, nextStage);
+      let html = '';
+      for (let s = 1; s <= maxStageToShow; s++) {
+        const sFee = (3.40 * Math.pow(1.15, s - 1)).toFixed(2);
+        const isUnlocked = unlockedStages.includes(s);
+        const isActive = (s === viewStage);
+
+        if (isUnlocked) {
+          html += `
+            <button type="button" class="stage-tab-btn ${isActive ? 'active' : ''}" onclick="if(window.App) window.App.switchMatrixStage(${s});">
+              <span>Stage ${s}</span>
+              <span class="stage-tab-badge">$${sFee} USDT</span>
+            </button>
+          `;
+        } else if (s === nextStage) {
+          if (data.can_upgrade_stage) {
+            html += `
+              <button type="button" class="stage-tab-btn" style="border-color: #10B981; color: #10B981; background: rgba(16, 185, 129, 0.1);" onclick="if(window.App) window.App.openStageUpgradeModal();">
+                <span>🔓 Stage ${s}</span>
+                <span class="stage-tab-badge" style="background: rgba(16, 185, 129, 0.25); color: #10B981; font-weight: 800;">Ready ($${sFee})</span>
+              </button>
+            `;
+          } else {
+            html += `
+              <button type="button" class="stage-tab-btn locked" title="Requires ${targetMembers} team members in Stage ${curStage} to unlock">
+                <span>🔒 Stage ${s}</span>
+                <span class="stage-tab-badge">Locked ($${sFee})</span>
+              </button>
+            `;
+          }
+        }
+      }
+      navContainer.innerHTML = html;
+    }
+
+    // 2. Active Stage Status Badge
+    if (badgeContainer) {
+      const isViewingActive = unlockedStages.includes(viewStage);
+      badgeContainer.innerHTML = `
+        <span style="font-size: 0.78rem; font-weight: 700; color: ${isViewingActive ? 'var(--primary-cyan)' : 'var(--accent-amber)'}; display: inline-flex; align-items: center; gap: 6px; background: rgba(255, 255, 255, 0.05); padding: 4px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: ${isViewingActive ? '#10B981' : '#F59E0B'}; display: inline-block;"></span>
+          Viewing Stage ${viewStage} Matrix (${viewStage === 1 ? '$3.40' : '$' + (3.40 * Math.pow(1.15, viewStage - 1)).toFixed(2)} USDT)
+        </span>
+      `;
+    }
+
+    // 3. Progression Card Details
+    if (cardTitle) {
+      cardTitle.textContent = `Stage ${nextStage} Matrix Loop Progression`;
+    }
+    if (boostBadge) {
+      boostBadge.textContent = `+15% Earnings Boost ($${nextFee.toFixed(2)} USDT)`;
+    }
+    if (cardSubtitle) {
+      cardSubtitle.textContent = `Accumulate 1,000 team members across all 8 tiers in Stage ${curStage} to unlock Stage ${nextStage} ($${nextFee.toFixed(2)} USDT entry with higher commissions across all 8 tiers).`;
+    }
+    if (ratioEl) {
+      ratioEl.textContent = `${curQualifying.toLocaleString()} / ${targetMembers.toLocaleString()} Members (${progressPct.toFixed(1)}%)`;
+    }
+    if (fillEl) {
+      fillEl.style.width = `${progressPct}%`;
+    }
+
+    // 4. Upgrade Action Container
+    if (actionContainer) {
+      if (data.can_upgrade_stage) {
+        actionContainer.innerHTML = `
+          <button type="button" class="stage-upgrade-btn" onclick="if(window.App) window.App.openStageUpgradeModal();">
+            <span>⚡ Upgrade to Stage ${nextStage} ($${nextFee.toFixed(2)} USDT)</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </button>
+        `;
+      } else {
+        const remaining = Math.max(0, targetMembers - curQualifying);
+        actionContainer.innerHTML = `
+          <div style="font-size: 0.78rem; color: var(--text-muted); background: rgba(255, 255, 255, 0.05); padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); display: inline-flex; align-items: center; gap: 6px;">
+            <span>🔒 Locked</span>
+            <span style="color: var(--accent-amber); font-weight: 700;">(${remaining.toLocaleString()} members needed)</span>
+          </div>
+        `;
+      }
+    }
+  }
+
   renderLiveDashboardData(data) {
     if (!data) return;
     this.currentDashboardData = data;
+
+    // Render Stage Progression and Switcher
+    this.renderStageProgression(data);
 
     const elBalance = document.getElementById('kpiWalletBalance');
     const elEarned = document.getElementById('kpiTotalEarned');
@@ -243,7 +365,8 @@ class AppController {
     const container = document.getElementById('matrixGridCards');
     if (container && data.levels && Array.isArray(data.levels)) {
       const levelPcts = [21, 16, 13, 9, 6, 3, 2, 1];
-      const levelAmounts = [0.714, 0.544, 0.442, 0.306, 0.204, 0.102, 0.068, 0.034];
+      const viewFee = Number(data.view_stage_fee || (3.40 * Math.pow(1.15, (data.active_view_stage || 1) - 1)));
+      const levelAmounts = levelPcts.map(pct => (pct / 100.0) * viewFee);
 
       container.innerHTML = data.levels.map((lvl, idx) => {
         const isTier1 = lvl.level_num === 1;
@@ -792,7 +915,8 @@ class AppController {
 
     this.dashboardPollInterval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/user-dashboard?user_id=${userId}&t=${Date.now()}`);
+        const stage = this.selectedStage || 1;
+        const res = await fetch(`/api/user-dashboard?user_id=${userId}&stage=${stage}&t=${Date.now()}`);
         if (res.ok) {
           const liveData = await res.json();
           this.renderLiveDashboardData(liveData);
@@ -861,6 +985,219 @@ class AppController {
 
     } catch (err) {
       this.showToast(`⚠️ Verification Failed: ${err.message}`, 'warning');
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // MULTI-STAGE PROGRESSIVE MATRIX UPGRADE SYSTEM
+  // --------------------------------------------------------------------------
+  openStageUpgradeModal() {
+    const data = this.currentDashboardData;
+    if (!data) return;
+
+    const nextStage = Number(data.next_stage || ((data.current_stage || 1) + 1));
+    const nextFee = Number(data.next_stage_fee || (3.40 * Math.pow(1.15, nextStage - 1))).toFixed(2);
+
+    const titleEl = document.getElementById('stageUpgradeModalTitle');
+    const subEl = document.getElementById('stageUpgradeModalSubtitle');
+    const feeEl = document.getElementById('stageUpgradeFeeDisplay');
+    const btnFeeEl = document.getElementById('btnStageUpgradeFeeText');
+    const sponsorInput = document.getElementById('stageUpgradeSponsorInput');
+    const hashInput = document.getElementById('stageUpgradeTxHashInput');
+    const qrBox = document.getElementById('stageUpgradeQrBox');
+
+    if (titleEl) titleEl.textContent = `Upgrade to Stage ${nextStage} Matrix`;
+    if (subEl) subEl.textContent = `Send ${nextFee} USDT on BSC to unlock your Stage ${nextStage} board with +15% boosted commissions across all 8 tiers.`;
+    if (feeEl) feeEl.textContent = `${nextFee} USDT (BEP-20)`;
+    if (btnFeeEl) btnFeeEl.textContent = `${nextFee} USDT`;
+    if (sponsorInput) sponsorInput.value = data.referrer_id || '';
+    if (hashInput) hashInput.value = '';
+
+    if (qrBox) {
+      qrBox.innerHTML = '';
+      try {
+        if (window.QRCode) {
+          new window.QRCode(qrBox, {
+            text: `ethereum:0x9ff36bB1b16F1421b2CeBFFE311aCB8D5800AE43@56?value=${nextFee}`,
+            width: 114,
+            height: 114
+          });
+        }
+      } catch (e) {
+        console.warn('QR Code generation error:', e);
+      }
+    }
+
+    this.openModal('modalStageUpgrade');
+  }
+
+  closeStageUpgradeModal() {
+    this.closeModal('modalStageUpgrade');
+  }
+
+  async payStageUpgradeMetaMask() {
+    const data = this.currentDashboardData;
+    if (!data) {
+      this.showToast('Dashboard data not loaded. Please refresh.', 'warning');
+      return;
+    }
+
+    const nextStage = Number(data.next_stage || ((data.current_stage || 1) + 1));
+    const nextFee = Number(data.next_stage_fee || (3.40 * Math.pow(1.15, nextStage - 1)));
+    const sponsorInput = document.getElementById('stageUpgradeSponsorInput');
+    const sponsorId = sponsorInput ? (sponsorInput.value || '').trim() : '';
+
+    if (typeof window.ethereum === 'undefined') {
+      alert('MetaMask is not detected in your browser. Please install MetaMask or use the manual transaction hash option below.');
+      return;
+    }
+
+    const btnMetaMask = document.getElementById('btnStageUpgradeMetaMask');
+    const origBtnHtml = btnMetaMask ? btnMetaMask.innerHTML : '';
+    if (btnMetaMask) {
+      btnMetaMask.disabled = true;
+      btnMetaMask.innerHTML = 'Connecting to MetaMask...';
+    }
+
+    try {
+      this.showToast('Connecting to MetaMask...', 'info');
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      if (!accounts || accounts.length === 0) {
+        throw new Error('No MetaMask account selected.');
+      }
+      const senderAddress = accounts[0];
+
+      // Ensure BSC Mainnet (0x38 = 56)
+      try {
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x38' }]
+        });
+      } catch (switchError) {
+        if (switchError.code === 4902) {
+          await window.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: '0x38',
+              chainName: 'Binance Smart Chain Mainnet',
+              nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+              rpcUrls: ['https://bsc-dataseed.binance.org/'],
+              blockExplorerUrls: ['https://bscscan.com']
+            }]
+          });
+        }
+      }
+
+      // Treasury recipient address
+      const treasuryAddress = '0x9ff36bB1b16F1421b2CeBFFE311aCB8D5800AE43';
+      const cleanTo = treasuryAddress.toLowerCase().replace('0x', '').padStart(64, '0');
+      // USDT on BSC has 18 decimals
+      const amountWeiBigInt = BigInt(Math.floor(nextFee * 1e18));
+      const amountWeiHex = amountWeiBigInt.toString(16).padStart(64, '0');
+      const transferCalldata = '0xa9059cbb' + cleanTo + amountWeiHex;
+
+      if (btnMetaMask) btnMetaMask.innerHTML = `Confirming ${nextFee.toFixed(2)} USDT in MetaMask...`;
+      this.showToast(`Please confirm the ${nextFee.toFixed(2)} USDT transfer in your MetaMask...`, 'info');
+
+      const txHash = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: senderAddress,
+          to: '0x55d398326f99059ff775485246999027b3197955', // BSC USDT Contract
+          data: transferCalldata
+        }]
+      });
+
+      this.showToast(`⚡ Transaction Broadcast! TxID: ${txHash.slice(0, 12)}... Verifying on-chain...`, 'info');
+      if (btnMetaMask) btnMetaMask.innerHTML = 'Verifying On-Chain...';
+
+      // Submit to backend
+      const userId = data.unique_id;
+      const res = await fetch('/api/upgrade-stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          target_stage: nextStage,
+          tx_hash: txHash,
+          sponsor_id: sponsorId || null
+        })
+      });
+
+      const json = await res.json();
+      if (!res.ok || json.status === 'ERROR') {
+        throw new Error(json.message || 'Stage upgrade verification failed.');
+      }
+
+      this.showToast(`🎉 Congratulations! You have successfully upgraded to Stage ${nextStage}!`, 'success');
+      this.closeStageUpgradeModal();
+      this.switchMatrixStage(nextStage);
+
+    } catch (err) {
+      console.error('MetaMask upgrade error:', err);
+      this.showToast(err.message || 'MetaMask transaction was cancelled or failed.', 'warning');
+    } finally {
+      if (btnMetaMask) {
+        btnMetaMask.disabled = false;
+        btnMetaMask.innerHTML = origBtnHtml;
+      }
+    }
+  }
+
+  async submitStageUpgradeTx() {
+    const data = this.currentDashboardData;
+    if (!data) {
+      this.showToast('Dashboard data not loaded. Please refresh.', 'warning');
+      return;
+    }
+
+    const nextStage = Number(data.next_stage || ((data.current_stage || 1) + 1));
+    const txHash = (document.getElementById('stageUpgradeTxHashInput').value || '').trim();
+    const sponsorInput = document.getElementById('stageUpgradeSponsorInput');
+    const sponsorId = sponsorInput ? (sponsorInput.value || '').trim() : '';
+
+    if (!txHash || !txHash.startsWith('0x') || txHash.length < 64) {
+      this.showToast('Please enter a valid 66-character BSC Transaction Hash (0x...).', 'warning');
+      return;
+    }
+
+    const btn = document.getElementById('btnSubmitStageUpgradeTx');
+    const origHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = 'Verifying on BSC Blockchain...';
+    }
+
+    try {
+      this.showToast('Verifying transaction on Binance Smart Chain...', 'info');
+      const res = await fetch('/api/upgrade-stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: data.unique_id,
+          target_stage: nextStage,
+          tx_hash: txHash,
+          sponsor_id: sponsorId || null
+        })
+      });
+
+      const json = await res.json();
+      if (!res.ok || json.status === 'ERROR') {
+        throw new Error(json.message || 'Stage upgrade verification failed.');
+      }
+
+      this.showToast(`🎉 Upgrade Verified! Welcome to Stage ${nextStage} Matrix Loop!`, 'success');
+      this.closeStageUpgradeModal();
+      this.switchMatrixStage(nextStage);
+
+    } catch (err) {
+      console.error('Stage upgrade submit error:', err);
+      this.showToast(err.message || 'Verification failed. Please check the transaction hash and try again.', 'warning');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+      }
     }
   }
 

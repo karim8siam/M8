@@ -58,9 +58,9 @@ def normalize_address(hex_str):
         clean = clean[-40:]
     return '0x' + clean
 
-def verify_bsc_deposit(tx_hash, expected_sender_wallet=None):
+def verify_bsc_deposit(tx_hash, expected_sender_wallet=None, required_amount=REQUIRED_USDT_AMOUNT):
     """
-    Verifies on-chain if tx_hash is a confirmed BSC USDT transfer to SYSTEM_TREASURY for >= 3.40 USDT.
+    Verifies on-chain if tx_hash is a confirmed BSC USDT transfer to SYSTEM_TREASURY for >= required_amount USDT.
     Returns dict with verification results.
     """
     tx_hash = tx_hash.strip()
@@ -108,7 +108,7 @@ def verify_bsc_deposit(tx_hash, expected_sender_wallet=None):
             if to_addr == SYSTEM_TREASURY:
                 # Check contract is BSC USDT
                 if log_contract == BSC_USDT_CONTRACT:
-                    if amount_usdt >= REQUIRED_USDT_AMOUNT - 0.001:
+                    if amount_usdt >= required_amount - 0.001:
                         valid_transfer = {
                             'contract': log_contract,
                             'from_wallet': from_addr,
@@ -122,7 +122,7 @@ def verify_bsc_deposit(tx_hash, expected_sender_wallet=None):
     if not valid_transfer:
         return {
             'verified': False,
-            'error': f'No confirmed 3.40 USDT transfer found to Treasury ({SYSTEM_TREASURY[:10]}...).'
+            'error': f'No confirmed {required_amount:.2f} USDT transfer found to Treasury ({SYSTEM_TREASURY[:10]}...).'
         }
 
     # Verified on BSC Mainnet

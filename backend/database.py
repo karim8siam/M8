@@ -250,11 +250,35 @@ def init_db():
         ''')
 
         cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_stages (
+                user_id VARCHAR(64) NOT NULL,
+                stage INTEGER NOT NULL,
+                fee_paid DOUBLE PRECISION NOT NULL,
+                sponsor_id VARCHAR(64),
+                tx_hash VARCHAR(128),
+                activated_timestamp BIGINT NOT NULL,
+                status VARCHAR(32) DEFAULT 'ACTIVE',
+                PRIMARY KEY (user_id, stage)
+            );
+        ''')
+
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS system_config (
                 key VARCHAR(64) PRIMARY KEY,
                 value TEXT
             );
         ''')
+
+        # PostgreSQL schema alterations for existing databases
+        try:
+            cursor.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS current_stage INTEGER DEFAULT 1;')
+        except Exception:
+            pass
+
+        try:
+            cursor.execute('ALTER TABLE level_stats ADD COLUMN IF NOT EXISTS stage INTEGER DEFAULT 1;')
+        except Exception:
+            pass
 
     else:
         # SQLite Schema
@@ -283,12 +307,21 @@ def init_db():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS level_stats (
                 user_id TEXT NOT NULL,
+                stage INTEGER NOT NULL DEFAULT 1,
                 level_num INTEGER NOT NULL,
                 member_count INTEGER DEFAULT 0,
                 earned_amount REAL DEFAULT 0.0,
-                PRIMARY KEY (user_id, level_num)
+                PRIMARY KEY (user_id, stage, level_num)
             )
         ''')
+
+        try:
+            cursor.execute('CREATE TABLE IF NOT EXISTS level_stats_v2 (user_id TEXT NOT NULL, stage INTEGER NOT NULL DEFAULT 1, level_num INTEGER NOT NULL, member_count INTEGER DEFAULT 0, earned_amount REAL DEFAULT 0.0, PRIMARY KEY (user_id, stage, level_num))')
+            cursor.execute('INSERT OR IGNORE INTO level_stats_v2 (user_id, stage, level_num, member_count, earned_amount) SELECT user_id, COALESCE(stage, 1), level_num, member_count, earned_amount FROM level_stats')
+            cursor.execute('DROP TABLE level_stats')
+            cursor.execute('ALTER TABLE level_stats_v2 RENAME TO level_stats')
+        except Exception:
+            pass
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS withdrawals (
@@ -325,11 +358,34 @@ def init_db():
         ''')
 
         cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_stages (
+                user_id TEXT NOT NULL,
+                stage INTEGER NOT NULL,
+                fee_paid REAL NOT NULL,
+                sponsor_id TEXT,
+                tx_hash TEXT,
+                activated_timestamp INTEGER NOT NULL,
+                status TEXT DEFAULT 'ACTIVE',
+                PRIMARY KEY (user_id, stage)
+            )
+        ''')
+
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS system_config (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
         ''')
+
+        try:
+            cursor.execute('ALTER TABLE users ADD COLUMN current_stage INTEGER DEFAULT 1')
+        except Exception:
+            pass
+
+        try:
+            cursor.execute('ALTER TABLE level_stats ADD COLUMN stage INTEGER DEFAULT 1')
+        except Exception:
+            pass
 
     # Seed Genesis Root Admin Accounts (M8-ADMIN, M8-VIP001, ADMIN)
     admin_ids = ['M8-ADMIN', 'M8-VIP001', 'ADMIN']
@@ -339,8 +395,8 @@ def init_db():
             cursor.execute('''
                 INSERT INTO users (
                     unique_id, email, password_hash, wallet_address, referrer_id,
-                    telegram_handle, status, join_timestamp, total_earned, wallet_balance, directs_count
-                ) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, 0.0, 0.0, 0)
+                    telegram_handle, status, join_timestamp, total_earned, wallet_balance, directs_count, current_stage
+                ) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, 0.0, 0.0, 0, 1)
             ''', (
                 admin_id,
                 f'{admin_id.lower()}@matrix8.io',
@@ -353,9 +409,26 @@ def init_db():
 
             for lvl in range(1, 9):
                 cursor.execute('''
-                    INSERT OR IGNORE INTO level_stats (user_id, level_num, member_count, earned_amount)
-                    VALUES (?, ?, 0, 0.0)
+                    INSERT OR IGNORE INTO level_stats (user_id, level_num, member_count, earned_amount, stage)
+                    VALUES (?, ?, 0, 0.0, 1)
                 ''', (admin_id, lvl))
+
+    # Ensure all existing active users have Stage 1 in user_stages
+    try:
+        cursor.execute("SELECT unique_id, referrer_id, join_timestamp FROM users WHERE status = 'ACTIVE'")
+        active_users = cursor.fetchall()
+        for u in active_users:
+            uid = u['unique_id'] if isinstance(u, dict) else u[0]
+            ref = u['referrer_id'] if isinstance(u, dict) else u[1]
+            ts = u['join_timestamp'] if isinstance(u, dict) else u[2]
+            cursor.execute('SELECT user_id FROM user_stages WHERE user_id = ? AND stage = 1', (uid,))
+            if not cursor.fetchone():
+                cursor.execute('''
+                    INSERT INTO user_stages (user_id, stage, fee_paid, sponsor_id, tx_hash, activated_timestamp, status)
+                    VALUES (?, 1, 3.40, ?, 'INITIAL_STAGE1', ?, 'ACTIVE')
+                ''', (uid, ref, ts))
+    except Exception:
+        pass
 
     conn.commit()
     conn.close()

@@ -73,19 +73,30 @@ class handler(http.server.BaseHTTPRequestHandler):
                 'treasury_address': database.SYSTEM_TREASURY_ADDRESS,
                 'usdt_contract': bsc_verifier.BSC_USDT_CONTRACT,
                 'registration_fee_usdt': matrix_service.REGISTRATION_FEE,
+                'base_registration_fee_usdt': matrix_service.BASE_REGISTRATION_FEE,
+                'stage_increment_percentage': matrix_service.STAGE_INCREMENT_PERCENTAGE,
+                'stage_milestone_members': matrix_service.STAGE_MILESTONE_MEMBERS,
                 'min_withdrawal_usdt': matrix_service.MIN_WITHDRAWAL_AMOUNT,
                 'levels_count': 8,
-                'database_mode': 'Neon PostgreSQL' if database.is_postgres() else 'SQLite'
+                'database_mode': 'Neon PostgreSQL' if database.is_postgres() else 'SQLite',
+                'stages': [
+                    {'stage': 1, 'name': 'Starter Matrix', 'fee': matrix_service.get_stage_fee(1), 'milestone': 1000},
+                    {'stage': 2, 'name': 'Silver Matrix', 'fee': matrix_service.get_stage_fee(2), 'milestone': 1000},
+                    {'stage': 3, 'name': 'Gold Matrix', 'fee': matrix_service.get_stage_fee(3), 'milestone': 1000},
+                    {'stage': 4, 'name': 'Platinum Matrix', 'fee': matrix_service.get_stage_fee(4), 'milestone': 1000},
+                    {'stage': 5, 'name': 'Diamond Matrix', 'fee': matrix_service.get_stage_fee(5), 'milestone': 1000}
+                ]
             })
             return
 
         # GET /api/user-dashboard
         elif 'user-dashboard' in req_path:
             user_id = query.get('user_id', [None])[0]
+            stage = query.get('stage', [1])[0]
             if not user_id:
                 user_id = database.SYSTEM_ROOT_ID
             
-            dashboard = matrix_service.get_user_dashboard(user_id)
+            dashboard = matrix_service.get_user_dashboard(user_id, stage=stage)
             if dashboard:
                 self.send_json_response(dashboard)
             else:
@@ -189,6 +200,35 @@ class handler(http.server.BaseHTTPRequestHandler):
             try:
                 activation = matrix_service.activate_user_and_distribute(user_id, tx_hash)
                 self.send_json_response({'success': True, 'data': activation})
+            except Exception as e:
+                self.send_json_response({'success': False, 'error': str(e)}, status=400)
+            return
+
+        # POST /api/upgrade-stage
+        elif 'upgrade-stage' in req_path:
+            user_id = body.get('user_id', '')
+            target_stage = body.get('target_stage', 2)
+            tx_hash = body.get('tx_hash', '').strip()
+            sponsor_id = body.get('sponsor_id', None)
+            is_mock_test = body.get('is_mock_test', False)
+
+            if not user_id:
+                self.send_json_response({'success': False, 'error': 'Missing user_id'}, status=400)
+                return
+
+            if not tx_hash:
+                self.send_json_response({'success': False, 'error': 'Please provide a valid BSC Transaction Hash (0x...)'}, status=400)
+                return
+
+            try:
+                res = matrix_service.upgrade_user_stage(
+                    user_id=user_id,
+                    target_stage=target_stage,
+                    tx_hash=tx_hash,
+                    sponsor_id=sponsor_id,
+                    is_mock_test=is_mock_test
+                )
+                self.send_json_response({'success': True, 'data': res})
             except Exception as e:
                 self.send_json_response({'success': False, 'error': str(e)}, status=400)
             return

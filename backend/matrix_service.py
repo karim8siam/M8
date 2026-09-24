@@ -11,8 +11,19 @@ from database import get_db, SYSTEM_ROOT_ID, SYSTEM_TREASURY_ADDRESS
 import bsc_verifier
 
 LEVEL_PERCENTAGES = [0.21, 0.16, 0.13, 0.09, 0.06, 0.03, 0.02, 0.01]
+BASE_REGISTRATION_FEE = 3.40
 REGISTRATION_FEE = 3.40
+STAGE_INCREMENT_PERCENTAGE = 0.15 # +15% per stage
+STAGE_MILESTONE_MEMBERS = 1000     # 1,000 team members to unlock next stage
 SYSTEM_BASE_PERCENTAGE = 0.29
+
+def get_stage_fee(stage):
+    try:
+        s = max(1, int(stage))
+    except Exception:
+        s = 1
+    fee = BASE_REGISTRATION_FEE * ((1 + STAGE_INCREMENT_PERCENTAGE) ** (s - 1))
+    return round(fee, 2)
 
 # 4-Factor Master Security Vault Credentials
 ADMIN_MASTER_PASSWORD_1 = "4990OrpU4990!HelloWorld123"
@@ -116,8 +127,8 @@ def register_user(email, password, sponsor_id, wallet_address, telegram_handle='
     cursor.execute('''
         INSERT INTO users (
             unique_id, email, password_hash, wallet_address, referrer_id,
-            telegram_handle, status, join_timestamp, total_earned, wallet_balance, directs_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, 0)
+            telegram_handle, status, join_timestamp, total_earned, wallet_balance, directs_count, current_stage
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, 0, 1)
     ''', (
         new_id,
         email_clean,
@@ -129,17 +140,30 @@ def register_user(email, password, sponsor_id, wallet_address, telegram_handle='
         now
     ))
 
-    # Initialize 8-level stats
+    # Initialize 8-level stats for Stage 1
     for lvl in range(1, 9):
         cursor.execute('''
-            INSERT INTO level_stats (user_id, level_num, member_count, earned_amount)
-            VALUES (?, ?, 0, 0.0)
+            INSERT INTO level_stats (user_id, level_num, member_count, earned_amount, stage)
+            VALUES (?, ?, 0, 0.0, 1)
         ''', (new_id, lvl))
+
+    # Initialize Stage 1 in user_stages
+    cursor.execute('''
+        INSERT INTO user_stages (user_id, stage, fee_paid, sponsor_id, tx_hash, activated_timestamp, status)
+        VALUES (?, 1, ?, ?, ?, ?, ?)
+    ''', (
+        new_id,
+        0.0 if is_admin_link else BASE_REGISTRATION_FEE,
+        sponsor_clean,
+        f"ADMIN_VIP_{new_id}_{now}" if is_admin_link else None,
+        now,
+        'ACTIVE' if is_admin_link else 'PENDING'
+    ))
 
     # If joining via Admin link: 100% Free Instant VIP Activation
     if is_admin_link:
         cursor.execute('UPDATE users SET directs_count = directs_count + 1 WHERE unique_id = ?', (sponsor_clean,))
-        cursor.execute('UPDATE level_stats SET member_count = member_count + 1 WHERE user_id = ? AND level_num = 1', (sponsor_clean,))
+        cursor.execute('UPDATE level_stats SET member_count = member_count + 1 WHERE user_id = ? AND level_num = 1 AND stage = 1', (sponsor_clean,))
         
         cursor.execute('''
             INSERT INTO transactions (
@@ -191,6 +215,10 @@ def activate_user_and_distribute(user_id, tx_hash):
 
     # Activate user
     cursor.execute("UPDATE users SET status = 'ACTIVE' WHERE unique_id = ?", (user_id,))
+    cursor.execute('''
+        UPDATE user_stages SET status = 'ACTIVE', tx_hash = ?, fee_paid = ?
+        WHERE user_id = ? AND stage = 1
+    ''', (tx_hash, BASE_REGISTRATION_FEE, user_id))
 
     # Log the incoming 3.4 USDT deposit
     now = int(time.time())
@@ -236,11 +264,11 @@ def activate_user_and_distribute(user_id, tx_hash):
                     WHERE unique_id = ?
                 ''', (commission_amount, commission_amount, current_upline_id))
 
-                # Update 8-level stats
+                # Update 8-level stats for Stage 1
                 cursor.execute('''
                     UPDATE level_stats 
                     SET member_count = member_count + 1, earned_amount = earned_amount + ?
-                    WHERE user_id = ? AND level_num = ?
+                    WHERE user_id = ? AND level_num = ? AND (stage = 1 OR stage IS NULL)
                 ''', (commission_amount, current_upline_id, level_num))
 
                 # Log commission tx
@@ -369,7 +397,7 @@ def auto_detect_and_activate(user_id):
     except Exception as e:
         return {'verified': False, 'error': str(e)}
 
-def get_user_dashboard(user_id):
+def get_user_dashboard(user_id, stage=1):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -379,9 +407,33 @@ def get_user_dashboard(user_id):
         conn.close()
         return None
 
-    # Fetch 8 level stats
-    cursor.execute('SELECT level_num, member_count, earned_amount FROM level_stats WHERE user_id = ? ORDER BY level_num ASC', (user_id,))
+    try:
+        view_stage = max(1, int(stage))
+    except Exception:
+        view_stage = 1
+
+    current_stage = (dict(user).get('current_stage') or 1)
+
+    # Fetch all active stages for this user
+    cursor.execute("SELECT stage, fee_paid, sponsor_id, activated_timestamp, status FROM user_stages WHERE user_id = ? AND status = 'ACTIVE' ORDER BY stage ASC", (user_id,))
+    unlocked_stage_rows = [dict(r) for r in cursor.fetchall()]
+    unlocked_stages = [r['stage'] for r in unlocked_stage_rows] if unlocked_stage_rows else [1]
+
+    # Fetch 8 level stats for requested view_stage
+    cursor.execute('''
+        SELECT level_num, member_count, earned_amount 
+        FROM level_stats 
+        WHERE user_id = ? AND (stage = ? OR (? = 1 AND stage IS NULL))
+        ORDER BY level_num ASC
+    ''', (user_id, view_stage, view_stage))
     levels = [dict(row) for row in cursor.fetchall()]
+
+    if not levels or len(levels) < 8:
+        existing_nums = {l['level_num'] for l in levels}
+        for lvl in range(1, 9):
+            if lvl not in existing_nums:
+                levels.append({'level_num': lvl, 'member_count': 0, 'earned_amount': 0.0})
+        levels.sort(key=lambda x: x['level_num'])
 
     # Fetch recent transactions strictly relevant to this user
     cursor.execute('''
@@ -389,7 +441,7 @@ def get_user_dashboard(user_id):
         WHERE (to_user_id = ? AND tx_type LIKE '%COMMISSION%')
            OR (to_user_id = ? AND tx_type LIKE '%WITHDRAWAL%')
            OR (from_user_id = ? AND tx_type LIKE '%WITHDRAWAL%')
-           OR (from_user_id = ? AND tx_type = 'BSC_DEPOSIT')
+           OR (from_user_id = ? AND tx_type LIKE '%DEPOSIT%')
         ORDER BY timestamp DESC LIMIT 20
     ''', (user_id, user_id, user_id, user_id))
     txs = [dict(row) for row in cursor.fetchall()]
@@ -398,8 +450,26 @@ def get_user_dashboard(user_id):
     cursor.execute('SELECT * FROM withdrawals WHERE user_id = ? ORDER BY request_timestamp DESC LIMIT 20', (user_id,))
     withdrawals = [dict(row) for row in cursor.fetchall()]
 
-    # Aggregate total downlines
+    # Aggregate total downlines in this view_stage
     total_downlines = sum(l['member_count'] for l in levels)
+
+    # Aggregate all-stages total downlines
+    cursor.execute('SELECT SUM(member_count) as all_dl FROM level_stats WHERE user_id = ?', (user_id,))
+    all_dl_row = cursor.fetchone()
+    all_downlines = all_dl_row['all_dl'] if all_dl_row and all_dl_row['all_dl'] is not None else total_downlines
+
+    # Milestone calculation for upgrading from current_stage to next stage
+    milestone_target = STAGE_MILESTONE_MEMBERS
+    cursor.execute('SELECT SUM(member_count) as cur_dl FROM level_stats WHERE user_id = ? AND (stage = ? OR (? = 1 AND stage IS NULL))', (user_id, current_stage, current_stage))
+    cur_dl_row = cursor.fetchone()
+    qualifying_downlines = cur_dl_row['cur_dl'] if cur_dl_row and cur_dl_row['cur_dl'] is not None else 0
+
+    progress_percentage = min(100.0, round((qualifying_downlines / milestone_target) * 100, 1))
+    next_stage = current_stage + 1
+    next_stage_fee = get_stage_fee(next_stage)
+    current_stage_fee = get_stage_fee(current_stage)
+    view_stage_fee = get_stage_fee(view_stage)
+    can_upgrade = (qualifying_downlines >= milestone_target)
 
     conn.close()
     return {
@@ -412,13 +482,258 @@ def get_user_dashboard(user_id):
         'total_withdrawn': (dict(user).get('total_withdrawn') or 0.0),
         'directs_count': user['directs_count'],
         'total_downlines': total_downlines,
+        'all_downlines': all_downlines,
         'referrer_id': user['referrer_id'],
         'levels': levels,
         'level_stats': levels,
         'transactions': txs,
         'withdrawals': withdrawals,
         'min_withdrawal_usdt': MIN_WITHDRAWAL_AMOUNT,
-        'treasury_address': SYSTEM_TREASURY_ADDRESS
+        'treasury_address': SYSTEM_TREASURY_ADDRESS,
+        # Multi-Stage Progression Loop fields
+        'current_stage': current_stage,
+        'active_view_stage': view_stage,
+        'current_stage_fee': current_stage_fee,
+        'view_stage_fee': view_stage_fee,
+        'unlocked_stages': unlocked_stages,
+        'next_stage': next_stage,
+        'next_stage_fee': next_stage_fee,
+        'milestone_target': milestone_target,
+        'qualifying_downlines': qualifying_downlines,
+        'stage_progress_pct': progress_percentage,
+        'can_upgrade_stage': can_upgrade
+    }
+
+def upgrade_user_stage(user_id, target_stage, tx_hash, sponsor_id=None, is_mock_test=False, ignore_milestone=False):
+    """
+    Upgrades user to target_stage (e.g. Stage 2, Stage 3).
+    Validates previous stage completion and 1,000 member milestone.
+    Verifies on-chain deposit of the progressive stage fee (e.g. 3.91 USDT).
+    Distributes 71% upline commissions across the 8-tier matrix in the new stage.
+    """
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT * FROM users WHERE unique_id = ?', (user_id,))
+    user = cursor.fetchone()
+    if not user:
+        conn.close()
+        raise ValueError(f"User {user_id} not found.")
+
+    target_stage = int(target_stage)
+    if target_stage <= 1:
+        conn.close()
+        raise ValueError("Target stage must be greater than 1.")
+
+    prev_stage = target_stage - 1
+    cursor.execute("SELECT * FROM user_stages WHERE user_id = ? AND stage = ? AND status = 'ACTIVE'", (user_id, prev_stage))
+    if not cursor.fetchone():
+        conn.close()
+        raise ValueError(f"You must activate Stage {prev_stage} before upgrading to Stage {target_stage}.")
+
+    cursor.execute("SELECT * FROM user_stages WHERE user_id = ? AND stage = ?", (user_id, target_stage))
+    existing = cursor.fetchone()
+    if existing and existing['status'] == 'ACTIVE':
+        conn.close()
+        return {'success': True, 'message': f'Stage {target_stage} is already active.', 'stage': target_stage}
+
+    # Check milestone qualification: 1,000 members in previous stage
+    cursor.execute('SELECT SUM(member_count) as total FROM level_stats WHERE user_id = ? AND (stage = ? OR (? = 1 AND stage IS NULL))', (user_id, prev_stage, prev_stage))
+    downline_row = cursor.fetchone()
+    prev_stage_downlines = downline_row['total'] if downline_row and downline_row['total'] is not None else 0
+
+    if user_id != SYSTEM_ROOT_ID and prev_stage_downlines < STAGE_MILESTONE_MEMBERS and not ignore_milestone:
+        conn.close()
+        raise ValueError(f"Stage {target_stage} requires at least {STAGE_MILESTONE_MEMBERS} team members in Stage {prev_stage}. Current: {prev_stage_downlines}")
+
+    stage_fee = get_stage_fee(target_stage)
+
+    if not is_mock_test:
+        cursor.execute('SELECT tx_hash FROM transactions WHERE tx_hash = ?', (tx_hash,))
+        if cursor.fetchone():
+            conn.close()
+            raise ValueError(f"This transaction hash ({tx_hash[:10]}...) has already been verified and used.")
+
+        expected_sender = user['wallet_address']
+        verification = bsc_verifier.verify_bsc_deposit(tx_hash, expected_sender_wallet=expected_sender, required_amount=stage_fee)
+        if not verification.get('verified'):
+            conn.close()
+            raise ValueError(verification.get('error', 'On-chain verification failed.'))
+
+    # Sponsor for this stage: use custom sponsor_id if valid, else fallback to stage 1 referrer
+    active_sponsor_id = None
+    if sponsor_id and str(sponsor_id).strip():
+        sp_clean = str(sponsor_id).strip()
+        cursor.execute('SELECT unique_id FROM users WHERE unique_id = ?', (sp_clean,))
+        sp = cursor.fetchone()
+        if sp:
+            active_sponsor_id = sp['unique_id']
+    if not active_sponsor_id:
+        active_sponsor_id = user['referrer_id']
+
+    now = int(time.time())
+
+    # Insert or update user_stages
+    if existing:
+        cursor.execute('''
+            UPDATE user_stages SET fee_paid = ?, sponsor_id = ?, tx_hash = ?, activated_timestamp = ?, status = 'ACTIVE'
+            WHERE user_id = ? AND stage = ?
+        ''', (stage_fee, active_sponsor_id, tx_hash, now, user_id, target_stage))
+    else:
+        cursor.execute('''
+            INSERT INTO user_stages (user_id, stage, fee_paid, sponsor_id, tx_hash, activated_timestamp, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')
+        ''', (user_id, target_stage, stage_fee, active_sponsor_id, tx_hash, now))
+
+    # Update users.current_stage
+    curr_stage = max(dict(user).get('current_stage') or 1, target_stage)
+    cursor.execute('UPDATE users SET current_stage = ? WHERE unique_id = ?', (curr_stage, user_id))
+
+    # Initialize level_stats for this user in target_stage
+    for lvl in range(1, 9):
+        cursor.execute('SELECT user_id FROM level_stats WHERE user_id = ? AND stage = ? AND level_num = ?', (user_id, target_stage, lvl))
+        if not cursor.fetchone():
+            cursor.execute('INSERT INTO level_stats (user_id, level_num, member_count, earned_amount, stage) VALUES (?, ?, 0, 0.0, ?)', (user_id, lvl, target_stage))
+
+    # Log deposit transaction
+    cursor.execute('''
+        INSERT INTO transactions (
+            tx_hash, tx_type, from_user_id, to_user_id, from_wallet, to_wallet,
+            amount_usdt, timestamp, status, note
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', ?)
+    ''', (
+        tx_hash,
+        f'STAGE_{target_stage}_DEPOSIT',
+        user_id,
+        SYSTEM_ROOT_ID,
+        user['wallet_address'],
+        SYSTEM_TREASURY_ADDRESS,
+        stage_fee,
+        now,
+        f"Stage {target_stage} Upgrade ({stage_fee} USDT) Confirmed on BSC"
+    ))
+
+    # Distribute 8-tier commissions across stage uplines
+    current_upline_id = active_sponsor_id
+    distributed_sum = 0.0
+    orphaned_pct = 0.0
+    commissions = []
+
+    for level_idx in range(8):
+        pct = LEVEL_PERCENTAGES[level_idx]
+        comm_amt = round(stage_fee * pct, 4)
+        level_num = level_idx + 1
+
+        if current_upline_id and current_upline_id != SYSTEM_ROOT_ID:
+            cursor.execute('SELECT * FROM users WHERE unique_id = ?', (current_upline_id,))
+            upline = cursor.fetchone()
+            if upline:
+                # Check if upline is active in target_stage to receive stage commission
+                cursor.execute("SELECT status FROM user_stages WHERE user_id = ? AND stage = ? AND status = 'ACTIVE'", (current_upline_id, target_stage))
+                upline_stage = cursor.fetchone()
+
+                if upline_stage or current_upline_id == SYSTEM_ROOT_ID:
+                    cursor.execute('''
+                        UPDATE users 
+                        SET total_earned = total_earned + ?, wallet_balance = wallet_balance + ?
+                        WHERE unique_id = ?
+                    ''', (comm_amt, comm_amt, current_upline_id))
+
+                    # Ensure upline level_stats for target_stage exists
+                    cursor.execute('SELECT user_id FROM level_stats WHERE user_id = ? AND stage = ? AND level_num = ?', (current_upline_id, target_stage, level_num))
+                    if not cursor.fetchone():
+                        cursor.execute('INSERT INTO level_stats (user_id, level_num, member_count, earned_amount, stage) VALUES (?, ?, 1, ?, ?)', (current_upline_id, level_num, comm_amt, target_stage))
+                    else:
+                        cursor.execute('''
+                            UPDATE level_stats 
+                            SET member_count = member_count + 1, earned_amount = earned_amount + ?
+                            WHERE user_id = ? AND stage = ? AND level_num = ?
+                        ''', (comm_amt, current_upline_id, target_stage, level_num))
+
+                    sub_tx = f"{tx_hash}_S{target_stage}_L{level_num}"
+                    cursor.execute('''
+                        INSERT INTO transactions (
+                            tx_hash, tx_type, from_user_id, to_user_id, from_wallet, to_wallet,
+                            amount_usdt, level_num, timestamp, status, note
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', ?)
+                    ''', (
+                        sub_tx,
+                        f'STAGE_{target_stage}_COMMISSION',
+                        user_id,
+                        upline['unique_id'],
+                        user['wallet_address'],
+                        upline['wallet_address'],
+                        comm_amt,
+                        level_num,
+                        now,
+                        f"Stage {target_stage} Level {level_num} Commission ({int(pct * 100)}%) - ${comm_amt} USDT"
+                    ))
+                    commissions.append({
+                        'level': level_num,
+                        'upline_id': upline['unique_id'],
+                        'upline_wallet': upline['wallet_address'],
+                        'amount_usdt': comm_amt,
+                        'percentage': pct * 100
+                    })
+                    distributed_sum += comm_amt
+                else:
+                    # Upline not in target_stage -> orphaned commission goes to treasury
+                    orphaned_pct += pct
+
+                # Advance upline sponsor
+                cursor.execute('SELECT sponsor_id FROM user_stages WHERE user_id = ? AND stage = ?', (current_upline_id, target_stage))
+                stg_ref = cursor.fetchone()
+                if stg_ref and stg_ref['sponsor_id']:
+                    current_upline_id = stg_ref['sponsor_id']
+                else:
+                    current_upline_id = upline['referrer_id']
+            else:
+                orphaned_pct += pct
+                current_upline_id = None
+        else:
+            orphaned_pct += pct
+            if current_upline_id:
+                cursor.execute('SELECT referrer_id FROM users WHERE unique_id = ?', (current_upline_id,))
+                row = cursor.fetchone()
+                current_upline_id = row['referrer_id'] if row else None
+
+    # Treasury Base (29%) + Orphaned
+    base_sys = round(stage_fee * SYSTEM_BASE_PERCENTAGE, 4)
+    orphan_sys = round(stage_fee * orphaned_pct, 4)
+    total_sys = round(base_sys + orphan_sys, 4)
+
+    cursor.execute('''
+        UPDATE users SET total_earned = total_earned + ?, wallet_balance = wallet_balance + ?
+        WHERE unique_id = ?
+    ''', (total_sys, total_sys, SYSTEM_ROOT_ID))
+
+    cursor.execute('''
+        INSERT INTO transactions (
+            tx_hash, tx_type, from_user_id, to_user_id, from_wallet, to_wallet,
+            amount_usdt, timestamp, status, note
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', ?)
+    ''', (
+        f"{tx_hash}_S{target_stage}_SYS",
+        f'STAGE_{target_stage}_TREASURY',
+        user_id,
+        SYSTEM_ROOT_ID,
+        user['wallet_address'],
+        SYSTEM_TREASURY_ADDRESS,
+        total_sys,
+        now,
+        f"Stage {target_stage} Treasury Base (${base_sys}) + Orphaned (${orphan_sys})"
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        'success': True,
+        'user_id': user_id,
+        'stage': target_stage,
+        'fee_paid': stage_fee,
+        'distributed_sum': distributed_sum,
+        'commissions': commissions
     }
 
 MIN_WITHDRAWAL_AMOUNT = 5.00
