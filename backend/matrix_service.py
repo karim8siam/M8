@@ -471,6 +471,16 @@ def get_user_dashboard(user_id, stage=1):
     view_stage_fee = get_stage_fee(view_stage)
     can_upgrade = (qualifying_downlines >= milestone_target)
 
+    cursor.execute('''
+        SELECT COUNT(*) as stg_dir
+        FROM user_stages
+        WHERE sponsor_id = ? AND stage = ? AND status = 'ACTIVE'
+    ''', (user_id, view_stage))
+    stg_dir_row = cursor.fetchone()
+    stage_directs = stg_dir_row['stg_dir'] if stg_dir_row and stg_dir_row['stg_dir'] is not None else 0
+    if view_stage == 1 and stage_directs == 0:
+        stage_directs = user['directs_count'] or 0
+
     conn.close()
     return {
         'unique_id': user['unique_id'],
@@ -481,6 +491,7 @@ def get_user_dashboard(user_id, stage=1):
         'wallet_balance': user['wallet_balance'] or 0.0,
         'total_withdrawn': (dict(user).get('total_withdrawn') or 0.0),
         'directs_count': user['directs_count'],
+        'stage_directs_count': stage_directs,
         'total_downlines': total_downlines,
         'all_downlines': all_downlines,
         'referrer_id': user['referrer_id'],
@@ -964,4 +975,109 @@ def login_user(email_or_wallet=None, credential="", email=None):
         'referrer_id': user['referrer_id'],
         'is_registered': True
     }
+
+def lookup_member_public(query_str):
+    """
+    Public lookup for any member referral code, Unique ID, email, or BEP-20 wallet.
+    Returns their verified total lifetime earned, current stage, highest matrix level,
+    active stages, and member breakdown.
+    """
+    if not query_str or not str(query_str).strip():
+        return None
+
+    clean = str(query_str).strip()
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT * FROM users 
+        WHERE LOWER(unique_id) = LOWER(?) 
+           OR LOWER(email) = LOWER(?) 
+           OR LOWER(wallet_address) = LOWER(?)
+        LIMIT 1
+    ''', (clean, clean, clean))
+    user = cursor.fetchone()
+
+    if not user:
+        conn.close()
+        return None
+
+    user_dict = dict(user)
+    uid = user_dict['unique_id']
+    curr_stage = user_dict.get('current_stage') or 1
+
+    # Fetch active stages for this user
+    cursor.execute('''
+        SELECT stage, fee_paid, status, activated_timestamp 
+        FROM user_stages 
+        WHERE user_id = ? AND status = 'ACTIVE' 
+        ORDER BY stage ASC
+    ''', (uid,))
+    stages_rows = [dict(r) for r in cursor.fetchall()]
+    unlocked_stages = [r['stage'] for r in stages_rows] if stages_rows else [1]
+
+    # Fetch 8-level stats across all stages
+    cursor.execute('''
+        SELECT level_num, SUM(member_count) as member_count, SUM(earned_amount) as earned_amount
+        FROM level_stats
+        WHERE user_id = ?
+        GROUP BY level_num
+        ORDER BY level_num ASC
+    ''', (uid,))
+    level_rows = [dict(r) for r in cursor.fetchall()]
+
+    all_levels = []
+    highest_level = 1
+    total_downlines = 0
+
+    for lvl in range(1, 9):
+        found = next((l for l in level_rows if l['level_num'] == lvl), None)
+        m_count = found['member_count'] if found else 0
+        e_amt = found['earned_amount'] if found else 0.0
+        total_downlines += m_count
+        if m_count > 0:
+            highest_level = lvl
+        all_levels.append({
+            'level_num': lvl,
+            'member_count': m_count,
+            'earned_amount': round(e_amt, 4)
+        })
+
+    # Mask email and wallet for public privacy
+    raw_email = user_dict.get('email') or ''
+    if '@' in raw_email:
+        name_part, domain_part = raw_email.split('@', 1)
+        masked_email = (name_part[:3] + '***@' + domain_part) if len(name_part) >= 3 else (name_part[:1] + '***@' + domain_part)
+    else:
+        masked_email = '***'
+
+    raw_wallet = user_dict.get('wallet_address') or ''
+    masked_wallet = f"{raw_wallet[:6]}...{raw_wallet[-4:]}" if len(raw_wallet) >= 10 else raw_wallet
+
+    stage_names = {
+        1: "Stage 1 (Starter Matrix)",
+        2: "Stage 2 (Silver Matrix)",
+        3: "Stage 3 (Gold Matrix)",
+        4: "Stage 4 (Platinum Matrix)",
+        5: "Stage 5 (Diamond Matrix)"
+    }
+    stage_name = stage_names.get(curr_stage, f"Stage {curr_stage} Matrix")
+
+    conn.close()
+    return {
+        'unique_id': uid,
+        'email_masked': masked_email,
+        'wallet_masked': masked_wallet,
+        'wallet_address': raw_wallet,
+        'status': user_dict.get('status', 'ACTIVE'),
+        'total_earned': round(user_dict.get('total_earned') or 0.0, 4),
+        'current_stage': curr_stage,
+        'stage_name': stage_name,
+        'unlocked_stages': unlocked_stages,
+        'highest_active_level': highest_level,
+        'directs_count': user_dict.get('directs_count') or 0,
+        'total_downlines': total_downlines,
+        'levels': all_levels
+    }
+
 

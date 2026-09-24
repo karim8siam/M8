@@ -17,6 +17,7 @@ class AppController {
     this.autoPollInterval = null;
     this.selectedStage = 1;
     this.currentDashboardData = null;
+    this.lookedUpMember = null;
 
     this.init();
   }
@@ -1807,6 +1808,92 @@ class AppController {
       toast.style.opacity = '0';
       setTimeout(() => toast.remove(), 300);
     }, 4500);
+  }
+
+  // --------------------------------------------------------------------------
+  // TOP MENU REFERRAL CODE SEARCH & MEMBER VERIFICATION
+  // --------------------------------------------------------------------------
+  async lookupMemberStats(passedCode = null) {
+    const inputEl = document.getElementById('navRefSearchInput');
+    const query = (passedCode || (inputEl ? inputEl.value : '')).trim();
+
+    if (!query) {
+      this.showToast('Please enter a referral code or Unique ID (e.g. M8-160303) to search.', 'warning');
+      if (inputEl) inputEl.focus();
+      return;
+    }
+
+    try {
+      this.showToast(`Searching for member "${query}"...`, 'info');
+      const res = await fetch(`/api/member-lookup?ref_code=${encodeURIComponent(query)}&t=${Date.now()}`);
+      const json = await res.json();
+
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || `Member with referral code "${query}" was not found.`);
+      }
+
+      this.renderMemberLookupModal(json.data);
+    } catch (err) {
+      console.warn('Member lookup error:', err);
+      this.showToast(err.message, 'warning');
+    }
+  }
+
+  renderMemberLookupModal(member) {
+    if (!member) return;
+    this.lookedUpMember = member;
+
+    const elId = document.getElementById('lookupModalUniqueId');
+    const elEarned = document.getElementById('lookupModalTotalEarned');
+    const elStage = document.getElementById('lookupModalCurrentStage');
+    const elLevel = document.getElementById('lookupModalHighestLevel');
+    const elDirects = document.getElementById('lookupModalDirects');
+    const elDownlines = document.getElementById('lookupModalDownlines');
+    const elStagesCount = document.getElementById('lookupModalStagesCount');
+    const elGrid = document.getElementById('lookupModalLevelsGrid');
+
+    if (elId) elId.textContent = member.unique_id;
+    if (elEarned) elEarned.textContent = `$${Number(member.total_earned || 0).toFixed(4)} USDT`;
+    if (elStage) elStage.textContent = `Stage ${member.current_stage}`;
+    if (elLevel) elLevel.textContent = `Level ${member.highest_active_level} Active Depth`;
+    if (elDirects) elDirects.textContent = member.directs_count || 0;
+    if (elDownlines) elDownlines.textContent = member.total_downlines || 0;
+    if (elStagesCount) elStagesCount.textContent = (member.unlocked_stages || [1]).length;
+
+    if (elGrid && member.levels) {
+      const levelPcts = [21, 16, 13, 9, 6, 3, 2, 1];
+      elGrid.innerHTML = member.levels.map((lvl, idx) => `
+        <div style="background: var(--bg-surface-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 6px; text-align: center;">
+          <div style="font-size: 0.68rem; color: var(--text-muted); font-weight: 700;">L${lvl.level_num} (${levelPcts[idx]}%)</div>
+          <div class="mono" style="font-size: 0.85rem; font-weight: 800; color: ${lvl.member_count > 0 ? 'var(--primary-cyan)' : 'var(--text-muted)'}; margin: 2px 0;">${lvl.member_count} dl</div>
+          <div class="mono" style="font-size: 0.7rem; color: ${lvl.earned_amount > 0 ? '#10B981' : 'var(--text-muted)'};">$${Number(lvl.earned_amount).toFixed(2)}</div>
+        </div>
+      `).join('');
+    }
+
+    this.openModal('modalMemberLookup');
+  }
+
+  joinUnderLookedUpMember() {
+    if (!this.lookedUpMember) return;
+    const refCode = this.lookedUpMember.unique_id;
+    this.closeModal('modalMemberLookup');
+    this.switchAuthMode('register');
+    this.showRegistrationPage();
+
+    const sponsorInput = document.getElementById('regSponsorInput');
+    if (sponsorInput) {
+      sponsorInput.value = refCode;
+      sponsorInput.style.borderColor = 'var(--primary-cyan)';
+    }
+    this.showToast(`Selected sponsor ${refCode}! Complete registration to join their matrix.`, 'success');
+  }
+
+  copyLookedUpMemberLink() {
+    if (!this.lookedUpMember) return;
+    const link = `${window.location.origin}/?ref=${this.lookedUpMember.unique_id}`;
+    navigator.clipboard.writeText(link);
+    this.showToast(`Referral link for ${this.lookedUpMember.unique_id} copied to clipboard!`, 'info');
   }
 }
 

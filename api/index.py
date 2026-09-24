@@ -103,6 +103,20 @@ class handler(http.server.BaseHTTPRequestHandler):
                 self.send_json_response({'error': 'User not found'}, status=404)
             return
 
+        # GET /api/member-lookup?ref_code=...
+        elif 'member-lookup' in req_path:
+            ref_code = query.get('ref_code', [None])[0] or query.get('id', [None])[0] or query.get('q', [None])[0]
+            if not ref_code:
+                self.send_json_response({'success': False, 'error': 'Please enter a referral code or ID to search.'}, status=400)
+                return
+            
+            data = matrix_service.lookup_member_public(ref_code)
+            if data:
+                self.send_json_response({'success': True, 'data': data})
+            else:
+                self.send_json_response({'success': False, 'error': f"Member with referral code '{ref_code}' not found."}, status=404)
+            return
+
         # GET /api/auto-check-deposit
         elif 'auto-check-deposit' in req_path:
             user_id = query.get('user_id', [None])[0]
