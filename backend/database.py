@@ -16,6 +16,24 @@ SYSTEM_ROOT_ID = 'M8-VIP001'
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'matrix8.db')
 
+def _load_env():
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+    if os.path.isfile(env_path):
+        try:
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        k, v = line.split('=', 1)
+                        k = k.strip()
+                        v = v.strip().strip("'\"")
+                        if k and k not in os.environ:
+                            os.environ[k] = v
+        except Exception:
+            pass
+
+_load_env()
+
 def get_database_url():
     """Fetches database connection string from environment variables."""
     return (
@@ -201,17 +219,19 @@ def init_db():
                 total_earned DOUBLE PRECISION DEFAULT 0.0,
                 wallet_balance DOUBLE PRECISION DEFAULT 0.0,
                 total_withdrawn DOUBLE PRECISION DEFAULT 0.0,
-                directs_count INTEGER DEFAULT 0
+                directs_count INTEGER DEFAULT 0,
+                current_stage INTEGER DEFAULT 1
             );
         ''')
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS level_stats (
                 user_id VARCHAR(64) NOT NULL,
+                stage INTEGER NOT NULL DEFAULT 1,
                 level_num INTEGER NOT NULL,
                 member_count INTEGER DEFAULT 0,
                 earned_amount DOUBLE PRECISION DEFAULT 0.0,
-                PRIMARY KEY (user_id, level_num)
+                PRIMARY KEY (user_id, stage, level_num)
             );
         ''')
 
