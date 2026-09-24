@@ -976,26 +976,29 @@ def login_user(email_or_wallet=None, credential="", email=None):
         'is_registered': True
     }
 
-def lookup_member_public(query_str):
+def lookup_member_public(referral_code):
     """
-    Public lookup for any member referral code, Unique ID, email, or BEP-20 wallet.
-    Returns their verified total lifetime earned, current stage, highest matrix level,
-    active stages, and member breakdown.
+    Public lookup strictly by member referral code / Unique ID (e.g. M8-160303).
+    Emails, wallet addresses, and other identifiers are strictly not permitted.
     """
-    if not query_str or not str(query_str).strip():
+    if not referral_code or not str(referral_code).strip():
         return None
 
-    clean = str(query_str).strip()
+    clean = str(referral_code).strip()
+
+    # Reject email and wallet addresses explicitly
+    if '@' in clean or clean.lower().startswith('0x'):
+        return None
+
     conn = get_db()
     cursor = conn.cursor()
 
+    # Query strictly by unique_id (referral code)
     cursor.execute('''
         SELECT * FROM users 
-        WHERE LOWER(unique_id) = LOWER(?) 
-           OR LOWER(email) = LOWER(?) 
-           OR LOWER(wallet_address) = LOWER(?)
+        WHERE LOWER(unique_id) = LOWER(?)
         LIMIT 1
-    ''', (clean, clean, clean))
+    ''', (clean,))
     user = cursor.fetchone()
 
     if not user:

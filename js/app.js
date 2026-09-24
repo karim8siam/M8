@@ -1818,13 +1818,19 @@ class AppController {
     const query = (passedCode || (inputEl ? inputEl.value : '')).trim();
 
     if (!query) {
-      this.showToast('Please enter a referral code or Unique ID (e.g. M8-160303) to search.', 'warning');
+      this.showToast('Please enter a referral code (e.g. M8-160303) to search.', 'warning');
+      if (inputEl) inputEl.focus();
+      return;
+    }
+
+    if (query.includes('@') || query.toLowerCase().startsWith('0x')) {
+      this.showToast('⚠️ Please enter a Referral Code only (e.g. M8-160303). Emails and wallet addresses are not permitted.', 'warning');
       if (inputEl) inputEl.focus();
       return;
     }
 
     try {
-      this.showToast(`Searching for member "${query}"...`, 'info');
+      this.showToast(`Searching for referral code "${query}"...`, 'info');
       const res = await fetch(`/api/member-lookup?ref_code=${encodeURIComponent(query)}&t=${Date.now()}`);
       const json = await res.json();
 

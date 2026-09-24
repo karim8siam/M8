@@ -117,11 +117,15 @@ class Matrix8RequestHandler(http.server.SimpleHTTPRequestHandler):
 
         # GET /api/member-lookup?ref_code=...
         elif parsed.path == '/api/member-lookup':
-            ref_code = query.get('ref_code', [None])[0] or query.get('id', [None])[0] or query.get('q', [None])[0]
+            ref_code = (query.get('ref_code', [None])[0] or query.get('id', [None])[0] or query.get('q', [None])[0] or '').strip()
             if not ref_code:
-                self.send_json_response({'success': False, 'error': 'Please enter a referral code or ID to search.'}, status=400)
+                self.send_json_response({'success': False, 'error': 'Please enter a referral code (e.g. M8-160303) to search.'}, status=400)
                 return
             
+            if '@' in ref_code or ref_code.lower().startswith('0x'):
+                self.send_json_response({'success': False, 'error': 'Please search using a Referral Code only (e.g. M8-160303). Emails and wallet addresses are not permitted.'}, status=400)
+                return
+
             data = matrix_service.lookup_member_public(ref_code)
             if data:
                 self.send_json_response({'success': True, 'data': data})
