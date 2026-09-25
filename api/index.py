@@ -44,6 +44,7 @@ class handler(http.server.BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(response_bytes)))
+        self.send_header('Connection', 'close')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Pin, X-Admin-Token')
         self.end_headers()

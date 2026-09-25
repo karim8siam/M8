@@ -61,9 +61,10 @@ class PostgresRowDict(dict):
         return super().__getitem__(key)
 
 class PostgresCursorWrapper:
-    def __init__(self, real_cursor, is_pg8000=False):
+    def __init__(self, real_cursor, is_pg8000=False, parent_conn=None):
         self.cursor = real_cursor
         self.is_pg8000 = is_pg8000
+        self.parent_conn = parent_conn
         self.col_names = []
 
     def _convert_sql(self, sql):
@@ -86,12 +87,32 @@ class PostgresCursorWrapper:
 
     def execute(self, sql, params=None):
         pg_sql = self._convert_sql(sql)
-        if params is not None:
-            # Flatten or format tuple/list
-            p = list(params) if isinstance(params, (tuple, list)) else [params]
-            self.cursor.execute(pg_sql, p)
-        else:
-            self.cursor.execute(pg_sql)
+        p = (list(params) if isinstance(params, (tuple, list)) else [params]) if params is not None else None
+
+        # Auto-retry up to 2 times for Neon serverless pooler wake-up / dropped idle socket
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                if p is not None:
+                    self.cursor.execute(pg_sql, p)
+                else:
+                    self.cursor.execute(pg_sql)
+                break
+            except Exception as e:
+                err_msg = str(e).lower()
+                is_socket_drop = any(phrase in err_msg for phrase in [
+                    'closed the connection', 'terminated abnormally', 'connection reset',
+                    'broken pipe', 'could not connect', 'bad connection'
+                ])
+                if attempt < max_retries - 1 and is_socket_drop and self.parent_conn:
+                    time.sleep(0.5)
+                    try:
+                        new_conn = self.parent_conn.reconnect()
+                        self.cursor = new_conn.conn.cursor()
+                    except Exception:
+                        pass
+                else:
+                    raise
 
         if self.cursor.description:
             self.col_names = [col[0] for col in self.cursor.description]
@@ -124,47 +145,76 @@ class PostgresCursorWrapper:
             pass
 
 class PostgresConnectionWrapper:
-    def __init__(self, real_conn, is_pg8000=False):
+    def __init__(self, real_conn, is_pg8000=False, url=None):
         self.conn = real_conn
         self.is_pg8000 = is_pg8000
+        self.url = url
+
+    def reconnect(self):
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+        if self.url:
+            self.conn, self.is_pg8000 = _raw_connect_postgres(self.url)
+        return self
 
     def cursor(self):
         real_cur = self.conn.cursor()
-        return PostgresCursorWrapper(real_cur, self.is_pg8000)
+        return PostgresCursorWrapper(real_cur, self.is_pg8000, parent_conn=self)
 
     def commit(self):
-        return self.conn.commit()
+        try:
+            return self.conn.commit()
+        except Exception:
+            pass
 
     def rollback(self):
-        return self.conn.rollback()
+        try:
+            return self.conn.rollback()
+        except Exception:
+            pass
 
     def close(self):
-        return self.conn.close()
+        try:
+            return self.conn.close()
+        except Exception:
+            pass
 
-def _connect_postgres(url):
-    """Establishes connection to PostgreSQL using psycopg2, psycopg, or pg8000."""
-    # Try psycopg2
+def _raw_connect_postgres(url):
+    """Low-level PostgreSQL connection helper with timeout and keepalives."""
+    # 1. Try psycopg2
     try:
         import psycopg2
-        import psycopg2.extras
-        # Replace postgres:// with postgresql:// if needed
         clean_url = url
         if clean_url.startswith('postgres://'):
             clean_url = clean_url.replace('postgres://', 'postgresql://', 1)
-        conn = psycopg2.connect(clean_url, sslmode='require')
-        return PostgresConnectionWrapper(conn, is_pg8000=False)
+        conn = psycopg2.connect(
+            clean_url,
+            sslmode='require',
+            connect_timeout=15,
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5
+        )
+        try:
+            conn.autocommit = True
+        except Exception:
+            pass
+        return conn, False
     except ImportError:
         pass
 
-    # Try psycopg (v3)
+    # 2. Try psycopg (v3)
     try:
         import psycopg
-        conn = psycopg.connect(url)
-        return PostgresConnectionWrapper(conn, is_pg8000=False)
+        conn = psycopg.connect(url, autocommit=True)
+        return conn, False
     except ImportError:
         pass
 
-    # Try pg8000 (Pure Python)
+    # 3. Try pg8000 (Pure Python)
     try:
         import pg8000
         import ssl
@@ -181,11 +231,27 @@ def _connect_postgres(url):
             database=p.path.lstrip('/'),
             ssl_context=ssl_ctx
         )
-        return PostgresConnectionWrapper(conn, is_pg8000=True)
+        try:
+            conn.autocommit = True
+        except Exception:
+            pass
+        return conn, True
     except ImportError:
         pass
 
     raise RuntimeError("PostgreSQL connection URL provided, but neither psycopg2, psycopg, nor pg8000 are installed.")
+
+def _connect_postgres(url):
+    """Establishes connection to PostgreSQL with retry for serverless cold-start sleep."""
+    last_err = None
+    for attempt in range(3):
+        try:
+            raw_conn, is_pg8000 = _raw_connect_postgres(url)
+            return PostgresConnectionWrapper(raw_conn, is_pg8000=is_pg8000, url=url)
+        except Exception as e:
+            last_err = e
+            time.sleep(1.0)
+    raise last_err
 
 def get_db():
     """

@@ -62,8 +62,9 @@ class Matrix8RequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(response_bytes)))
+        self.send_header('Connection', 'close')
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Pin, X-Admin-Token')
         self.end_headers()
         self.wfile.write(response_bytes)
 
@@ -345,9 +346,9 @@ class Matrix8RequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json_response({'error': 'API Route Not Found'}, status=404)
 
 def run_server():
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(("", PORT), Matrix8RequestHandler) as httpd:
-        print(f"Matrix8 BEP-20 Backend listening on port {PORT}...")
+    server_address = ("", PORT)
+    with http.server.ThreadingHTTPServer(server_address, Matrix8RequestHandler) as httpd:
+        print(f"Matrix8 BEP-20 Backend listening on port {PORT} (Multi-Threaded)...")
         httpd.serve_forever()
 
 if __name__ == '__main__':
