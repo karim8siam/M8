@@ -6,8 +6,8 @@
 class TelegramService {
   constructor(matrixEngine) {
     this.matrixEngine = matrixEngine;
-    this.BOT_USERNAME = 'Matrix8_Official_Bot';
-    this.CHANNEL_URL = 'https://t.me/matrix8_community';
+    this.BOT_USERNAME = 'ffalfofaofgf8';
+    this.CHANNEL_URL = 'https://t.me/ffalfofaofgf8';
   }
 
   getBotUrl(uniqueId) {
