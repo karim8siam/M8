@@ -1887,10 +1887,13 @@ class AppController {
     this.switchAuthMode('register');
     this.showRegistrationPage();
 
-    const sponsorInput = document.getElementById('regSponsorInput');
+    const sponsorInput = document.getElementById('regSponsorId') || document.getElementById('regSponsorInput');
     if (sponsorInput) {
       sponsorInput.value = refCode;
       sponsorInput.style.borderColor = 'var(--primary-cyan)';
+    }
+    if (typeof this.checkSponsorVipStatus === 'function') {
+      this.checkSponsorVipStatus();
     }
     this.showToast(`Selected sponsor ${refCode}! Complete registration to join their matrix.`, 'success');
   }
