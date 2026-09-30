@@ -61,14 +61,26 @@ def normalize_address(hex_str):
 def verify_bsc_deposit(tx_hash, expected_sender_wallet=None, required_amount=REQUIRED_USDT_AMOUNT):
     """
     Verifies on-chain if tx_hash is a confirmed BSC USDT transfer to SYSTEM_TREASURY for >= required_amount USDT.
+    Enforces strict uniqueness against the database and matches sender wallet against user's registered account.
     Returns dict with verification results.
     """
-    tx_hash = tx_hash.strip()
+    tx_hash = str(tx_hash).strip().lower()
     if not tx_hash.startswith('0x') or len(tx_hash) != 66:
         return {
             'verified': False,
-            'error': 'Invalid BSC Transaction Hash format (Must be 66 chars starting with 0x)'
+            'error': 'Invalid BSC Transaction Hash format (Must be 66 characters starting with 0x).'
         }
+
+    # Pre-check database: Prevent replay attacks or reusing any previously verified hash
+    try:
+        import database
+        if database.is_tx_hash_used(tx_hash):
+            return {
+                'verified': False,
+                'error': f'This Transaction Hash ({tx_hash[:10]}...) has already been verified and used on this platform. Duplicate transaction hashes are strictly prohibited.'
+            }
+    except Exception:
+        pass
 
     # Query Receipt from BSC
     receipt = rpc_call('eth_getTransactionReceipt', [tx_hash])
@@ -94,8 +106,8 @@ def verify_bsc_deposit(tx_hash, expected_sender_wallet=None, required_amount=REQ
         topics = log.get('topics', [])
         
         if len(topics) >= 3 and topics[0].lower() == TRANSFER_TOPIC:
-            from_addr = normalize_address(topics[1])
-            to_addr = normalize_address(topics[2])
+            from_addr = normalize_address(topics[1]).lower()
+            to_addr = normalize_address(topics[2]).lower()
             data = log.get('data', '0x0')
             try:
                 raw_amount = int(data, 16)
@@ -124,6 +136,16 @@ def verify_bsc_deposit(tx_hash, expected_sender_wallet=None, required_amount=REQ
             'verified': False,
             'error': f'No confirmed {required_amount:.2f} USDT transfer found to Treasury ({SYSTEM_TREASURY[:10]}...).'
         }
+
+    # Strict Sender Wallet Validation: Prevent stealing/claiming others' transactions from BscScan
+    if expected_sender_wallet:
+        clean_expected = normalize_address(expected_sender_wallet).lower()
+        if valid_transfer['from_wallet'] != clean_expected:
+            actual_from = valid_transfer['from_wallet']
+            return {
+                'verified': False,
+                'error': f"Security Mismatch: Transaction on BSC was sent by ({actual_from[:8]}...{actual_from[-4:]}), which does not match your registered account wallet ({clean_expected[:8]}...{clean_expected[-4:]}). You can only verify transactions sent directly from your own registered wallet."
+            }
 
     # Verified on BSC Mainnet
     return {
@@ -177,8 +199,15 @@ def find_bsc_deposit_by_sender(sender_wallet, max_blocks=300):
             continue
 
         if amount_usdt >= REQUIRED_USDT_AMOUNT - 0.001:
+            clean_hash = str(tx_hash).strip().lower()
+            try:
+                import database
+                if database.is_tx_hash_used(clean_hash):
+                    continue
+            except Exception:
+                pass
             return {
-                'tx_hash': tx_hash,
+                'tx_hash': clean_hash,
                 'amount_usdt': amount_usdt,
                 'block_number': int(log.get('blockNumber', '0x0'), 16),
                 'from_wallet': sender_clean,

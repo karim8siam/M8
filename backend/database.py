@@ -355,9 +355,37 @@ def init_db():
             );
         ''')
 
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS used_tx_hashes (
+                tx_hash VARCHAR(128) PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                sender_wallet VARCHAR(128) NOT NULL,
+                purpose VARCHAR(64) NOT NULL,
+                amount_usdt DOUBLE PRECISION NOT NULL,
+                verified_timestamp BIGINT NOT NULL
+            );
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_used_tx_hashes_user ON used_tx_hashes (user_id);')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_used_tx_hashes_wallet ON used_tx_hashes (sender_wallet);')
+
         # PostgreSQL schema alterations for existing databases
         try:
             cursor.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS current_stage INTEGER DEFAULT 1;')
+        except Exception:
+            pass
+
+        try:
+            cursor.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS activation_tx_hash VARCHAR(128);')
+        except Exception:
+            pass
+
+        try:
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_activation_tx_hash ON users (LOWER(activation_tx_hash)) WHERE activation_tx_hash IS NOT NULL AND activation_tx_hash != '';")
+        except Exception:
+            pass
+
+        try:
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_stages_tx_hash ON user_stages (LOWER(tx_hash)) WHERE tx_hash IS NOT NULL AND tx_hash != '';")
         except Exception:
             pass
 
@@ -463,8 +491,36 @@ def init_db():
             )
         ''')
 
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS used_tx_hashes (
+                tx_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                sender_wallet TEXT NOT NULL,
+                purpose TEXT NOT NULL,
+                amount_usdt REAL NOT NULL,
+                verified_timestamp INTEGER NOT NULL
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_used_tx_hashes_user ON used_tx_hashes (user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_used_tx_hashes_wallet ON used_tx_hashes (sender_wallet)')
+
         try:
             cursor.execute('ALTER TABLE users ADD COLUMN current_stage INTEGER DEFAULT 1')
+        except Exception:
+            pass
+
+        try:
+            cursor.execute('ALTER TABLE users ADD COLUMN activation_tx_hash TEXT')
+        except Exception:
+            pass
+
+        try:
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_activation_tx_hash ON users (activation_tx_hash) WHERE activation_tx_hash IS NOT NULL AND activation_tx_hash != ''")
+        except Exception:
+            pass
+
+        try:
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_stages_tx_hash ON user_stages (tx_hash) WHERE tx_hash IS NOT NULL AND tx_hash != ''")
         except Exception:
             pass
 
@@ -511,13 +567,84 @@ def init_db():
             if not cursor.fetchone():
                 cursor.execute('''
                     INSERT INTO user_stages (user_id, stage, fee_paid, sponsor_id, tx_hash, activated_timestamp, status)
-                    VALUES (?, 1, 3.40, ?, 'INITIAL_STAGE1', ?, 'ACTIVE')
-                ''', (uid, ref, ts))
+                    VALUES (?, 1, 3.40, ?, ?, ?, 'ACTIVE')
+                ''', (uid, ref, f"INITIAL_{uid}_STAGE1", ts))
     except Exception:
         pass
 
     conn.commit()
     conn.close()
+
+def is_tx_hash_used(tx_hash):
+    """
+    Checks if a BSC transaction hash has already been verified and used anywhere in the platform.
+    Case-insensitive search across used_tx_hashes, transactions, users, and user_stages.
+    """
+    if not tx_hash:
+        return False
+    clean_hash = str(tx_hash).strip().lower()
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    # 1. Check used_tx_hashes table
+    cursor.execute('SELECT tx_hash FROM used_tx_hashes WHERE LOWER(tx_hash) = ?', (clean_hash,))
+    if cursor.fetchone():
+        conn.close()
+        return True
+        
+    # 2. Check transactions table
+    cursor.execute('SELECT tx_hash FROM transactions WHERE LOWER(tx_hash) = ?', (clean_hash,))
+    if cursor.fetchone():
+        conn.close()
+        return True
+        
+    # 3. Check user_stages table
+    cursor.execute('SELECT tx_hash FROM user_stages WHERE LOWER(tx_hash) = ?', (clean_hash,))
+    if cursor.fetchone():
+        conn.close()
+        return True
+
+    # 4. Check users.activation_tx_hash
+    try:
+        cursor.execute('SELECT unique_id FROM users WHERE LOWER(activation_tx_hash) = ?', (clean_hash,))
+        if cursor.fetchone():
+            conn.close()
+            return True
+    except Exception:
+        pass
+        
+    conn.close()
+    return False
+
+def record_used_tx_hash(tx_hash, user_id, sender_wallet, purpose, amount_usdt, conn=None):
+    """
+    Atomically records a verified transaction hash into used_tx_hashes.
+    Raises ValueError if already exists.
+    """
+    clean_hash = str(tx_hash).strip().lower()
+    now = int(time.time())
+    close_conn = False
+    if conn is None:
+        conn = get_db()
+        close_conn = True
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT INTO used_tx_hashes (tx_hash, user_id, sender_wallet, purpose, amount_usdt, verified_timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (clean_hash, str(user_id), (sender_wallet or '').lower(), str(purpose), float(amount_usdt), now))
+        if close_conn:
+            conn.commit()
+    except Exception as e:
+        if close_conn:
+            try:
+                conn.rollback()
+                conn.close()
+            except Exception:
+                pass
+        raise ValueError(f"Transaction hash ({clean_hash[:10]}...) has already been verified and used on this platform.")
+    if close_conn:
+        conn.close()
 
 if __name__ == '__main__':
     init_db()

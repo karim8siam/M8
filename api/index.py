@@ -188,7 +188,7 @@ class handler(http.server.BaseHTTPRequestHandler):
         # POST /api/verify-deposit
         elif 'verify-deposit' in req_path:
             user_id = body.get('user_id', '')
-            tx_hash = body.get('tx_hash', '').strip()
+            tx_hash = body.get('tx_hash', '').strip().lower()
             is_mock_test = body.get('is_mock_test', False)
 
             if not user_id:
@@ -227,7 +227,7 @@ class handler(http.server.BaseHTTPRequestHandler):
         elif 'upgrade-stage' in req_path:
             user_id = body.get('user_id', '')
             target_stage = body.get('target_stage', 2)
-            tx_hash = body.get('tx_hash', '').strip()
+            tx_hash = body.get('tx_hash', '').strip().lower()
             sponsor_id = body.get('sponsor_id', None)
             is_mock_test = body.get('is_mock_test', False)
 

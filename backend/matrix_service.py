@@ -7,7 +7,7 @@ import time
 import random
 import hashlib
 import hmac
-from database import get_db, SYSTEM_ROOT_ID, SYSTEM_TREASURY_ADDRESS
+from database import get_db, SYSTEM_ROOT_ID, SYSTEM_TREASURY_ADDRESS, is_tx_hash_used, record_used_tx_hash
 import bsc_verifier
 
 LEVEL_PERCENTAGES = [0.21, 0.16, 0.13, 0.09, 0.06, 0.03, 0.02, 0.01]
@@ -194,14 +194,14 @@ def register_user(email, password, sponsor_id, wallet_address, telegram_handle='
     }
 
 def activate_user_and_distribute(user_id, tx_hash):
+    clean_hash = str(tx_hash).strip().lower()
     conn = get_db()
     cursor = conn.cursor()
 
-    # Check replay attack
-    cursor.execute('SELECT id FROM transactions WHERE tx_hash = ?', (tx_hash,))
-    if cursor.fetchone():
+    # Universal replay attack prevention
+    if is_tx_hash_used(clean_hash):
         conn.close()
-        raise ValueError(f'This Transaction Hash ({tx_hash[:10]}...) has already been verified and used.')
+        raise ValueError(f'This Transaction Hash ({clean_hash[:10]}...) has already been verified and used on this platform.')
 
     cursor.execute('SELECT * FROM users WHERE unique_id = ?', (user_id,))
     user = cursor.fetchone()
@@ -213,12 +213,19 @@ def activate_user_and_distribute(user_id, tx_hash):
         conn.close()
         return {'status': 'ALREADY_ACTIVE', 'unique_id': user_id}
 
-    # Activate user
-    cursor.execute("UPDATE users SET status = 'ACTIVE' WHERE unique_id = ?", (user_id,))
+    # Activate user with unique activation_tx_hash
+    try:
+        cursor.execute("UPDATE users SET status = 'ACTIVE', activation_tx_hash = ? WHERE unique_id = ?", (clean_hash, user_id))
+    except Exception:
+        cursor.execute("UPDATE users SET status = 'ACTIVE' WHERE unique_id = ?", (user_id,))
+
     cursor.execute('''
         UPDATE user_stages SET status = 'ACTIVE', tx_hash = ?, fee_paid = ?
         WHERE user_id = ? AND stage = 1
-    ''', (tx_hash, BASE_REGISTRATION_FEE, user_id))
+    ''', (clean_hash, BASE_REGISTRATION_FEE, user_id))
+
+    # Atomically record into used_tx_hashes
+    record_used_tx_hash(clean_hash, user_id, user['wallet_address'], 'STAGE_1_ACTIVATION', REGISTRATION_FEE, conn=conn)
 
     # Log the incoming 3.4 USDT deposit
     now = int(time.time())
@@ -228,7 +235,7 @@ def activate_user_and_distribute(user_id, tx_hash):
             amount_usdt, timestamp, status, note
         ) VALUES (?, 'BSC_DEPOSIT', ?, ?, ?, ?, ?, ?, 'CONFIRMED', '3.40 USDT Activation Deposit Confirmed on BSC')
     ''', (
-        tx_hash,
+        clean_hash,
         user_id,
         SYSTEM_ROOT_ID,
         user['wallet_address'],
@@ -559,14 +566,15 @@ def upgrade_user_stage(user_id, target_stage, tx_hash, sponsor_id=None, is_mock_
 
     stage_fee = get_stage_fee(target_stage)
 
+    clean_hash = str(tx_hash).strip().lower() if tx_hash else f"mock_stage_{target_stage}_{user_id}_{now}"
+
     if not is_mock_test:
-        cursor.execute('SELECT tx_hash FROM transactions WHERE tx_hash = ?', (tx_hash,))
-        if cursor.fetchone():
+        if is_tx_hash_used(clean_hash):
             conn.close()
-            raise ValueError(f"This transaction hash ({tx_hash[:10]}...) has already been verified and used.")
+            raise ValueError(f"This transaction hash ({clean_hash[:10]}...) has already been verified and used on this platform.")
 
         expected_sender = user['wallet_address']
-        verification = bsc_verifier.verify_bsc_deposit(tx_hash, expected_sender_wallet=expected_sender, required_amount=stage_fee)
+        verification = bsc_verifier.verify_bsc_deposit(clean_hash, expected_sender_wallet=expected_sender, required_amount=stage_fee)
         if not verification.get('verified'):
             conn.close()
             raise ValueError(verification.get('error', 'On-chain verification failed.'))
@@ -589,12 +597,15 @@ def upgrade_user_stage(user_id, target_stage, tx_hash, sponsor_id=None, is_mock_
         cursor.execute('''
             UPDATE user_stages SET fee_paid = ?, sponsor_id = ?, tx_hash = ?, activated_timestamp = ?, status = 'ACTIVE'
             WHERE user_id = ? AND stage = ?
-        ''', (stage_fee, active_sponsor_id, tx_hash, now, user_id, target_stage))
+        ''', (stage_fee, active_sponsor_id, clean_hash, now, user_id, target_stage))
     else:
         cursor.execute('''
             INSERT INTO user_stages (user_id, stage, fee_paid, sponsor_id, tx_hash, activated_timestamp, status)
             VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')
-        ''', (user_id, target_stage, stage_fee, active_sponsor_id, tx_hash, now))
+        ''', (user_id, target_stage, stage_fee, active_sponsor_id, clean_hash, now))
+
+    # Record into used_tx_hashes
+    record_used_tx_hash(clean_hash, user_id, user['wallet_address'], f'STAGE_{target_stage}_UPGRADE', stage_fee, conn=conn)
 
     # Update users.current_stage
     curr_stage = max(dict(user).get('current_stage') or 1, target_stage)
@@ -613,7 +624,7 @@ def upgrade_user_stage(user_id, target_stage, tx_hash, sponsor_id=None, is_mock_
             amount_usdt, timestamp, status, note
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', ?)
     ''', (
-        tx_hash,
+        clean_hash,
         f'STAGE_{target_stage}_DEPOSIT',
         user_id,
         SYSTEM_ROOT_ID,
