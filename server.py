@@ -21,7 +21,7 @@ import bsc_verifier
 # Initialize SQLite database
 database.init_db()
 
-PORT = 8080
+PORT = int(os.environ.get('PORT', 8080))
 
 class Matrix8RequestHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
