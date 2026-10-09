@@ -256,10 +256,25 @@ def _connect_postgres(url):
 def get_db():
     """
     Returns a unified database connection.
-    Connects to Neon PostgreSQL if DATABASE_URL is set; otherwise falls back to SQLite.
+    Connects to Primary Neon PostgreSQL if DATABASE_URL is set;
+    automatically falls back to FALLBACK_DATABASE_URL if configured, or SQLite.
     """
     if is_postgres():
-        return _connect_postgres(get_database_url())
+        primary_url = get_database_url()
+        try:
+            return _connect_postgres(primary_url)
+        except Exception as primary_err:
+            fallback_url = (
+                os.environ.get('FALLBACK_DATABASE_URL') or 
+                os.environ.get('SECONDARY_DATABASE_URL') or 
+                ''
+            ).strip()
+            if fallback_url and (fallback_url.startswith('postgres://') or fallback_url.startswith('postgresql://')):
+                try:
+                    return _connect_postgres(fallback_url)
+                except Exception:
+                    pass
+            raise primary_err
     else:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
